@@ -10,7 +10,7 @@ declare global { interface Window { google: any; __kyoudouMapReady?: () => void 
 
 type Metric = "total" | "households_2025" | "population_2025" | "stores" | "delivery";
 type Area = {
-  id: number; code: string; address: string | null; municipality_town: string | null; town: string | null;
+  id: number; code: string; address: string | null; municipality_town: string | null; town: string | null; town2: string | null;
   households_2025: number | null; population_2025: number | null; households_2023: number | null;
   population_2023: number | null; stores: number | null; delivery: number | null;
   headquarters: number | null; corporation: number | null; total: number | null;
@@ -97,7 +97,7 @@ export default function MapDashboard() {
     map.data.addListener("click", (event: any) => {
       const area = areas.find((item) => item.id === Number(event.feature.getId())) ?? null;
       if (!area || !infoWindowRef.current) return;
-      infoWindowRef.current.setContent(`<div class="map-info"><b>${area.town ?? area.code}</b><span>${area.address ?? ""}</span><dl><div><dt>世帯数 2025</dt><dd>${area.households_2025?.toLocaleString() ?? "—"}</dd></div><div><dt>人口 2025</dt><dd>${area.population_2025?.toLocaleString() ?? "—"}</dd></div><div><dt>顧客合計</dt><dd>${area.total?.toLocaleString() ?? "—"}</dd></div></dl></div>`);
+      infoWindowRef.current.setContent(`<div class="map-info"><b>${area.town2 ?? area.town ?? area.code}</b><span>${area.address ?? ""}</span><dl><div><dt>世帯数 2025</dt><dd>${area.households_2025?.toLocaleString() ?? "—"}</dd></div><div><dt>人口 2025</dt><dd>${area.population_2025?.toLocaleString() ?? "—"}</dd></div><div><dt>顧客合計</dt><dd>${area.total?.toLocaleString() ?? "—"}</dd></div></dl></div>`);
       infoWindowRef.current.setPosition(event.latLng);
       infoWindowRef.current.open({ map });
     });
@@ -110,7 +110,7 @@ export default function MapDashboard() {
       onRemove() { this.div?.remove(); }
     }
     areas.filter((a) => a.address).forEach((area) => {
-      const label = new AreaLabel(centerOf(area.geom), `<b>${area.town ?? area.code}</b><strong>${Number(area.households_2025 ?? 0).toLocaleString()}</strong><strong>${Number(area.total ?? 0).toLocaleString()}</strong>`);
+      const label = new AreaLabel(centerOf(area.geom), `<b>${area.town2 ?? area.town ?? area.code}</b><strong>${Number(area.households_2025 ?? 0).toLocaleString()}</strong><strong>${Number(area.total ?? 0).toLocaleString()}</strong>`);
       label.setMap(labels ? map : null); labelsRef.current.push(label);
     });
     const refresh = () => labelsRef.current.forEach((label) => label.div && (label.div.style.display = labels && map.getZoom() >= 12 ? "grid" : "none"));
@@ -119,7 +119,7 @@ export default function MapDashboard() {
 
   function searchArea() {
     const value = query.trim(); if (!value) return;
-    const area = areas.find((a) => `${a.address ?? ""}${a.town ?? ""}${a.code}`.includes(value));
+    const area = areas.find((a) => `${a.address ?? ""}${a.town ?? ""}${a.town2 ?? ""}${a.code}`.includes(value));
     if (!area || !mapRef.current) { setStatus("該当する町丁目が見つかりません。"); return; }
     mapRef.current.panTo(centerOf(area.geom)); mapRef.current.setZoom(14); setStatus(`${area.address ?? area.code}を表示`);
   }
