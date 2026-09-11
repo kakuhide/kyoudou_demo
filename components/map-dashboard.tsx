@@ -23,6 +23,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
+const appVersion = "Ver.1.0.0";
 
 function loadGoogleMaps(key: string) {
   if (window.google?.maps) return Promise.resolve();
@@ -221,7 +222,7 @@ export default function MapDashboard() {
         <div className={`stroke-control ${polygons ? "" : "disabled"}`}><div><span>境界線の太さ</span><b>{strokeWeight}px</b></div><Slider value={[strokeWeight]} min={1} max={6} step={0.5} onValueChange={(value) => setStrokeWeight(value[0] ?? 2)} disabled={!polygons}/></div>
         <div className="toggle-row"><span>町丁目ラベル</span><Switch checked={labels} onCheckedChange={setLabels}/></div><div className="divider" />
         <label className="field-label">町丁目検索</label><div className="search-box"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && searchArea()} placeholder="例：桜区西堀"/><button onClick={searchArea} aria-label="検索"><Search size={17}/></button></div>
-        <div className="legend"><div className="field-label">凡例：{metricLabels[metric]}</div><div className="legend-scale">{palette.map((color) => <i key={color} style={{background: color}} />)}</div><div className="legend-label"><span>少ない</span><span>多い</span></div></div><p className="status">{status}</p>
+        <div className="legend"><div className="field-label">凡例：{metricLabels[metric]}</div><div className="legend-scale">{palette.map((color) => <i key={color} style={{background: color}} />)}</div><div className="legend-label"><span>少ない</span><span>多い</span></div></div><p className="status">{status}</p><div className="version-info">{appVersion}</div>
       </aside>
       <div className="map-wrap"><div ref={mapNode} className="map"/></div>
     </section>
