@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ArmBox｜さいたま市 商圏分析",
-  description: "共同開発様向けの町丁目別商圏分析マップ",
+  title: "ArmBox Lab",
+  description: "ArmBoxの機能開発・検証サイト",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 

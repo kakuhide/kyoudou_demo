@@ -1,6 +1,6 @@
-# 共同開発様向け ArmBox 商圏分析マップ
+# ArmBox Lab
 
-Google Maps上にSupabaseの`kyoudou.saitamasi_chouchoumoku`を表示するNext.jsアプリです。
+ArmBoxの機能開発・検証サイトです。Google Maps上にSupabaseの`kyoudou.saitamasi_chouchoumoku`を表示します。
 
 ## Supabase
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Building2, ChevronRight, Layers3, MapPin, Search, UsersRound, X } from "lucide-react";
+import { Layers3, MapPin, Search, UsersRound } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 
 declare global { interface Window { google: any; __kyoudouMapReady?: () => void } }
@@ -55,9 +56,10 @@ function valueColor(value: number, max: number) {
 }
 
 export default function MapDashboard() {
-  const mapNode = useRef<HTMLDivElement>(null); const mapRef = useRef<any>(null); const labelsRef = useRef<any[]>([]);
-  const [areas, setAreas] = useState<Area[]>([]); const [selected, setSelected] = useState<Area | null>(null);
+  const mapNode = useRef<HTMLDivElement>(null); const mapRef = useRef<any>(null); const labelsRef = useRef<any[]>([]); const infoWindowRef = useRef<any>(null);
+  const [areas, setAreas] = useState<Area[]>([]);
   const [metric, setMetric] = useState<Metric>("total"); const [labels, setLabels] = useState(true); const [fills, setFills] = useState(true);
+  const [polygons, setPolygons] = useState(true); const [strokeWeight, setStrokeWeight] = useState(2);
   const [query, setQuery] = useState(""); const [status, setStatus] = useState("データを読み込んでいます…");
   const maxValue = useMemo(() => Math.max(1, ...areas.map((a) => Number(a[metric] ?? 0))), [areas, metric]);
   const matchedCount = useMemo(() => areas.filter((a) => a.address).length, [areas]);
@@ -81,6 +83,7 @@ export default function MapDashboard() {
         fullscreenControl: false, clickableIcons: false, gestureHandling: "greedy",
         styles: [{ featureType: "poi", stylers: [{ visibility: "off" }] }],
       });
+      infoWindowRef.current = new window.google.maps.InfoWindow();
     }).catch((e) => setStatus(e.message));
   }, []);
 
@@ -89,8 +92,15 @@ export default function MapDashboard() {
     map.data.forEach((feature: any) => map.data.remove(feature));
     labelsRef.current.forEach((label) => label.setMap(null)); labelsRef.current = [];
     map.data.addGeoJson({ type: "FeatureCollection", features: areas.map((area) => ({ type: "Feature", id: String(area.id), geometry: area.geom, properties: { ...area, geom: undefined } })) });
-    map.data.setStyle((feature: any) => ({ fillColor: valueColor(Number(feature.getProperty(metric) ?? 0), maxValue), fillOpacity: fills ? 0.58 : 0, strokeColor: "#2d587c", strokeOpacity: 0.75, strokeWeight: 0.8 }));
-    map.data.addListener("click", (event: any) => { const area = areas.find((item) => item.id === Number(event.feature.getId())) ?? null; setSelected(area); if (area) map.panTo(centerOf(area.geom)); });
+    map.data.setStyle((feature: any) => ({ fillColor: valueColor(Number(feature.getProperty(metric) ?? 0), maxValue), fillOpacity: polygons && fills ? 0.58 : 0, strokeColor: "#000000", strokeOpacity: polygons ? 0.9 : 0, strokeWeight: polygons ? strokeWeight : 0 }));
+    window.google.maps.event.clearListeners(map.data, "click");
+    map.data.addListener("click", (event: any) => {
+      const area = areas.find((item) => item.id === Number(event.feature.getId())) ?? null;
+      if (!area || !infoWindowRef.current) return;
+      infoWindowRef.current.setContent(`<div class="map-info"><b>${area.town ?? area.code}</b><span>${area.address ?? ""}</span><dl><div><dt>世帯数 2025</dt><dd>${area.households_2025?.toLocaleString() ?? "—"}</dd></div><div><dt>人口 2025</dt><dd>${area.population_2025?.toLocaleString() ?? "—"}</dd></div><div><dt>顧客合計</dt><dd>${area.total?.toLocaleString() ?? "—"}</dd></div></dl></div>`);
+      infoWindowRef.current.setPosition(event.latLng);
+      infoWindowRef.current.open({ map });
+    });
 
     class AreaLabel extends window.google.maps.OverlayView {
       position: any; text: string; div?: HTMLDivElement;
@@ -100,35 +110,33 @@ export default function MapDashboard() {
       onRemove() { this.div?.remove(); }
     }
     areas.filter((a) => a.address).forEach((area) => {
-      const label = new AreaLabel(centerOf(area.geom), `<b>${area.town ?? area.code}</b><span>${metricLabels[metric]}</span><strong>${Number(area[metric] ?? 0).toLocaleString()}</strong>`);
+      const label = new AreaLabel(centerOf(area.geom), `<b>${area.town ?? area.code}</b><strong>${Number(area.households_2025 ?? 0).toLocaleString()}</strong><strong>${Number(area.total ?? 0).toLocaleString()}</strong>`);
       label.setMap(labels ? map : null); labelsRef.current.push(label);
     });
     const refresh = () => labelsRef.current.forEach((label) => label.div && (label.div.style.display = labels && map.getZoom() >= 12 ? "grid" : "none"));
-    refresh(); map.addListener("zoom_changed", refresh);
-  }, [areas, metric, maxValue, fills, labels]);
+    refresh(); window.google.maps.event.clearListeners(map, "zoom_changed"); map.addListener("zoom_changed", refresh);
+  }, [areas, metric, maxValue, fills, labels, polygons, strokeWeight]);
 
   function searchArea() {
     const value = query.trim(); if (!value) return;
     const area = areas.find((a) => `${a.address ?? ""}${a.town ?? ""}${a.code}`.includes(value));
     if (!area || !mapRef.current) { setStatus("該当する町丁目が見つかりません。"); return; }
-    setSelected(area); mapRef.current.panTo(centerOf(area.geom)); mapRef.current.setZoom(14); setStatus(`${area.address ?? area.code}を表示`);
+    mapRef.current.panTo(centerOf(area.geom)); mapRef.current.setZoom(14); setStatus(`${area.address ?? area.code}を表示`);
   }
 
   return <main className="app-shell">
-    <header className="topbar"><div className="brand"><div className="brand-mark">A</div><div><b>ArmBox</b><span>共同開発様向け 商圏分析</span></div></div><div className="top-stats"><span><MapPin size={16}/>{areas.length || "—"} 町丁目</span><span><UsersRound size={16}/>{matchedCount || "—"} データ対象</span></div></header>
+    <header className="topbar"><div className="brand"><div className="brand-mark">A</div><div><b>ArmBox Lab</b><span>機能開発・検証サイト</span></div></div><div className="top-stats"><span><MapPin size={16}/>{areas.length || "—"} 町丁目</span><span><UsersRound size={16}/>{matchedCount || "—"} データ対象</span></div></header>
     <section className="workspace">
       <aside className="sidebar"><div className="section-title"><Layers3 size={17}/>表示設定</div><label className="field-label">色分け項目</label>
         <Select value={metric} onValueChange={(value) => setMetric(value as Metric)}><SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(metricLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
-        <div className="toggle-row"><span>数値による色分け</span><Switch checked={fills} onCheckedChange={setFills}/></div><div className="toggle-row"><span>町丁目ラベル</span><Switch checked={labels} onCheckedChange={setLabels}/></div><div className="divider" />
+        <div className="toggle-row"><span>数値による色分け</span><Switch checked={fills} onCheckedChange={setFills}/></div>
+        <div className="toggle-row"><span>町丁目ポリゴン</span><Switch checked={polygons} onCheckedChange={setPolygons}/></div>
+        <div className={`stroke-control ${polygons ? "" : "disabled"}`}><div><span>境界線の太さ</span><b>{strokeWeight}px</b></div><Slider value={[strokeWeight]} min={1} max={6} step={0.5} onValueChange={(value) => setStrokeWeight(value[0] ?? 2)} disabled={!polygons}/></div>
+        <div className="toggle-row"><span>町丁目ラベル</span><Switch checked={labels} onCheckedChange={setLabels}/></div><div className="divider" />
         <label className="field-label">町丁目検索</label><div className="search-box"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && searchArea()} placeholder="例：桜区西堀"/><button onClick={searchArea} aria-label="検索"><Search size={17}/></button></div>
         <div className="legend"><div className="field-label">凡例：{metricLabels[metric]}</div><div className="legend-scale">{palette.map((color) => <i key={color} style={{background: color}} />)}</div><div className="legend-label"><span>少ない</span><span>多い</span></div></div><p className="status">{status}</p>
       </aside>
       <div className="map-wrap"><div ref={mapNode} className="map"/><div className="map-badge">さいたま市 町丁目分析</div></div>
-      <aside className={`details ${selected ? "open" : ""}`}><div className="details-head"><div><span>町丁目詳細</span><b>{selected?.town ?? "地図から選択"}</b></div>{selected && <button onClick={() => setSelected(null)} aria-label="詳細を閉じる"><X size={18}/></button>}</div>
-        {selected ? <><p className="address">{selected.address ?? "統計データなし"}</p><div className="detail-grid"><Stat label="世帯数 2025" value={selected.households_2025}/><Stat label="人口 2025" value={selected.population_2025}/><Stat label="店舗" value={selected.stores}/><Stat label="デリ" value={selected.delivery}/><Stat label="本部" value={selected.headquarters}/><Stat label="法人" value={selected.corporation}/></div><div className="total-card"><Building2 size={20}/><span>顧客合計<strong>{selected.total?.toLocaleString() ?? "—"}</strong></span></div><dl className="metadata"><div><dt>地域コード</dt><dd>{selected.code}</dd></div><div><dt>2023年人口</dt><dd>{selected.population_2023?.toLocaleString() ?? "—"}</dd></div></dl></> : <div className="empty-detail"><ChevronRight size={28}/><p>町丁目をクリックすると<br/>統計・顧客データを表示します</p></div>}
-      </aside>
     </section>
   </main>;
 }
-
-function Stat({ label, value }: { label: string; value: number | null }) { return <div className="stat"><span>{label}</span><strong>{value?.toLocaleString() ?? "—"}</strong></div>; }
