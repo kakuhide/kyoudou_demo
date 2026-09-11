@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layers3, MapPin, Search, UsersRound } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 
@@ -63,12 +62,12 @@ export default function MapDashboard() {
   const [areas, setAreas] = useState<Area[]>([]);
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [mapReady, setMapReady] = useState(false);
-  const [metric, setMetric] = useState<Metric>("total"); const [labels, setLabels] = useState(true); const [fills, setFills] = useState(true);
+  const [metric, setMetric] = useState<Metric>("total"); const [labels, setLabels] = useState(true); const [fills, setFills] = useState(false);
   const [polygons, setPolygons] = useState(true); const [strokeWeight, setStrokeWeight] = useState(2);
   const [tradeAreas, setTradeAreas] = useState(true); const [competitorLabels, setCompetitorLabels] = useState(true);
   const [competitorLabelStyle, setCompetitorLabelStyle] = useState<CompetitorLabelStyle>("band");
-  const [competitorLabelOffset, setCompetitorLabelOffset] = useState(18);
-  const [candidateLabelOffset, setCandidateLabelOffset] = useState(18);
+  const [competitorLabelOffset, setCompetitorLabelOffset] = useState(6);
+  const [candidateLabelOffset, setCandidateLabelOffset] = useState(6);
   const [query, setQuery] = useState(""); const [status, setStatus] = useState("データを読み込んでいます…");
   const [candidateLat, setCandidateLat] = useState(String(defaultCandidate.lat));
   const [candidateLng, setCandidateLng] = useState(String(defaultCandidate.lng));
@@ -105,7 +104,7 @@ export default function MapDashboard() {
       });
       infoWindowRef.current = new window.google.maps.InfoWindow();
       candidateMarkerRef.current = new window.google.maps.Marker({
-        map: mapRef.current, position: defaultCandidate, title: "候補地点", zIndex: 1000,
+        map: mapRef.current, position: defaultCandidate, title: "候補地点", zIndex: 10000, optimized: false,
         icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: "#f97316", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3, labelOrigin: new window.google.maps.Point(0, 2.8) },
         label: { text: "候補地点", color: "#7c2d12", fontSize: "12px", fontWeight: "800", className: "candidate-marker-label" },
       });
@@ -168,7 +167,7 @@ export default function MapDashboard() {
     class AreaLabel extends window.google.maps.OverlayView {
       position: any; text: string; div?: HTMLDivElement;
       constructor(position: any, text: string) { super(); this.position = position; this.text = text; }
-      onAdd() { this.div = document.createElement("div"); this.div.className = "area-label"; this.div.innerHTML = this.text; this.getPanes()?.overlayMouseTarget.appendChild(this.div); }
+      onAdd() { this.div = document.createElement("div"); this.div.className = "area-label"; this.div.innerHTML = this.text; this.getPanes()?.overlayLayer.appendChild(this.div); }
       draw() { const p = this.getProjection().fromLatLngToDivPixel(this.position); if (this.div && p) { this.div.style.left = `${p.x}px`; this.div.style.top = `${p.y}px`; } }
       onRemove() { this.div?.remove(); }
     }
@@ -206,17 +205,17 @@ export default function MapDashboard() {
           <label><span>緯度</span><input inputMode="decimal" value={candidateLat} onChange={(e) => setCandidateLat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setCandidatePoint()}/></label>
           <label><span>経度</span><input inputMode="decimal" value={candidateLng} onChange={(e) => setCandidateLng(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setCandidatePoint()}/></label>
         </div><button type="button" className="candidate-button" onClick={setCandidatePoint}><MapPin size={15}/>地図に設定</button>
-          <div className="label-offset-control"><div><span>ラベル間隔</span><b>{candidateLabelOffset}px</b></div><Slider value={[candidateLabelOffset]} min={6} max={42} step={1} onValueChange={(value) => setCandidateLabelOffset(value[0] ?? 18)}/></div>
+          <div className="label-offset-control"><div><span>ラベル間隔</span><b>{candidateLabelOffset}px</b></div><Slider value={[candidateLabelOffset]} min={2} max={14} step={1} onValueChange={(value) => setCandidateLabelOffset(value[0] ?? 6)}/></div>
         </div>
         <div className="toggle-row"><span>商圏（0.5・1・2km）</span><Switch checked={tradeAreas} onCheckedChange={setTradeAreas}/></div>
         <div className="trade-area-key"><span><i className="range-500"/>0.5km</span><span><i className="range-1000"/>1.0km</span><span><i className="range-2000"/>2.0km</span></div>
         <div className="toggle-row"><span>競合店舗名</span><Switch checked={competitorLabels} onCheckedChange={setCompetitorLabels}/></div>
         <label className="compact-label">競合ラベル表示</label>
-        <Select value={competitorLabelStyle} onValueChange={(value) => setCompetitorLabelStyle(value as CompetitorLabelStyle)}><SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="band">緑帯・黒文字</SelectItem><SelectItem value="halo">青文字・白ハロー</SelectItem></SelectContent></Select>
-        <div className="label-offset-control competitor-offset"><div><span>ラベル間隔</span><b>{competitorLabelOffset}px</b></div><Slider value={[competitorLabelOffset]} min={6} max={42} step={1} onValueChange={(value) => setCompetitorLabelOffset(value[0] ?? 18)}/></div>
+        <select className="native-select" value={competitorLabelStyle} onChange={(event) => setCompetitorLabelStyle(event.target.value as CompetitorLabelStyle)}><option value="band">緑帯・黒文字</option><option value="halo">青文字・白ハロー</option></select>
+        <div className="label-offset-control competitor-offset"><div><span>ラベル間隔</span><b>{competitorLabelOffset}px</b></div><Slider value={[competitorLabelOffset]} min={2} max={14} step={1} onValueChange={(value) => setCompetitorLabelOffset(value[0] ?? 6)}/></div>
         <div className="competitor-key"><i/>競合店舗 {competitors.length}店</div><div className="divider" />
         <label className="field-label">色分け項目</label>
-        <Select value={metric} onValueChange={(value) => setMetric(value as Metric)}><SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(metricLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
+        <select className="native-select" value={metric} onChange={(event) => setMetric(event.target.value as Metric)}>{Object.entries(metricLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
         <div className="toggle-row"><span>数値による色分け</span><Switch checked={fills} onCheckedChange={setFills}/></div>
         <div className="toggle-row"><span>町丁目ポリゴン</span><Switch checked={polygons} onCheckedChange={setPolygons}/></div>
         <div className={`stroke-control ${polygons ? "" : "disabled"}`}><div><span>境界線の太さ</span><b>{strokeWeight}px</b></div><Slider value={[strokeWeight]} min={1} max={6} step={0.5} onValueChange={(value) => setStrokeWeight(value[0] ?? 2)} disabled={!polygons}/></div>
