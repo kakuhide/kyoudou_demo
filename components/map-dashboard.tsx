@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 declare global { interface Window { google: any; __kyoudouMapReady?: () => void } }
 
 type Metric = "total" | "households_2025" | "population_2025" | "stores" | "delivery";
+type CompetitorLabelStyle = "band" | "halo";
 type Area = {
   id: number; code: string; address: string | null; municipality_town: string | null; town: string | null; town2: string | null;
   households_2025: number | null; population_2025: number | null; households_2023: number | null;
@@ -65,6 +66,9 @@ export default function MapDashboard() {
   const [metric, setMetric] = useState<Metric>("total"); const [labels, setLabels] = useState(true); const [fills, setFills] = useState(true);
   const [polygons, setPolygons] = useState(true); const [strokeWeight, setStrokeWeight] = useState(2);
   const [tradeAreas, setTradeAreas] = useState(true); const [competitorLabels, setCompetitorLabels] = useState(true);
+  const [competitorLabelStyle, setCompetitorLabelStyle] = useState<CompetitorLabelStyle>("band");
+  const [competitorLabelOffset, setCompetitorLabelOffset] = useState(18);
+  const [candidateLabelOffset, setCandidateLabelOffset] = useState(18);
   const [query, setQuery] = useState(""); const [status, setStatus] = useState("データを読み込んでいます…");
   const [candidateLat, setCandidateLat] = useState(String(defaultCandidate.lat));
   const [candidateLng, setCandidateLng] = useState(String(defaultCandidate.lng));
@@ -102,15 +106,15 @@ export default function MapDashboard() {
       infoWindowRef.current = new window.google.maps.InfoWindow();
       candidateMarkerRef.current = new window.google.maps.Marker({
         map: mapRef.current, position: defaultCandidate, title: "候補地点", zIndex: 1000,
-        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: "#f97316", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3, labelOrigin: new window.google.maps.Point(0, -2.5) },
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: "#f97316", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3, labelOrigin: new window.google.maps.Point(0, 2.8) },
         label: { text: "候補地点", color: "#7c2d12", fontSize: "12px", fontWeight: "800", className: "candidate-marker-label" },
       });
       tradeAreaCirclesRef.current = [
-        { radius: 2000, color: "#ff4fa3", weight: 3, zIndex: 1 },
-        { radius: 1000, color: "#ef1919", weight: 3, zIndex: 2 },
-        { radius: 500, color: "#8b0000", weight: 4, zIndex: 3 },
+        { radius: 2000, color: "#ff4fa3", weight: 6, zIndex: 1 },
+        { radius: 1000, color: "#ef1919", weight: 6, zIndex: 2 },
+        { radius: 500, color: "#8b0000", weight: 6, zIndex: 3 },
       ].map((item) => {
-        const circle = new window.google.maps.Circle({ map: mapRef.current, radius: item.radius, strokeColor: item.color, strokeOpacity: 1, strokeWeight: item.weight, fillColor: item.color, fillOpacity: 0.025, clickable: false, zIndex: item.zIndex });
+        const circle = new window.google.maps.Circle({ map: mapRef.current, radius: item.radius, strokeColor: item.color, strokeOpacity: 1, strokeWeight: item.weight, fillColor: item.color, fillOpacity: 0, clickable: false, zIndex: item.zIndex });
         circle.bindTo("center", candidateMarkerRef.current, "position"); return circle;
       });
       setMapReady(true);
@@ -120,14 +124,22 @@ export default function MapDashboard() {
   useEffect(() => { tradeAreaCirclesRef.current.forEach((circle) => circle.setMap(tradeAreas ? mapRef.current : null)); }, [tradeAreas, mapReady]);
 
   useEffect(() => {
+    mapNode.current?.style.setProperty("--candidate-label-offset", `${candidateLabelOffset}px`);
+  }, [candidateLabelOffset]);
+
+  useEffect(() => {
+    mapNode.current?.style.setProperty("--competitor-label-offset", `${competitorLabelOffset}px`);
+  }, [competitorLabelOffset]);
+
+  useEffect(() => {
     const map = mapRef.current; if (!map) return;
     competitorMarkersRef.current.forEach((marker) => marker.setMap(null)); competitorMarkersRef.current = [];
     competitors.forEach((store) => {
       const lat = Number(store.latitude); const lng = Number(store.longitude); if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const marker = new window.google.maps.Marker({
         map, position: { lat, lng }, title: store.store_name, zIndex: 800,
-        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: "#ffeb00", fillOpacity: 1, strokeColor: "#806f00", strokeWeight: 1.5, labelOrigin: new window.google.maps.Point(0, -2.8) },
-        label: competitorLabels ? { text: store.store_name, color: "#2e2a00", fontSize: "11px", fontWeight: "800", className: "competitor-marker-label" } : undefined,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: "#ffeb00", fillOpacity: 1, strokeColor: "#806f00", strokeWeight: 1.5, labelOrigin: new window.google.maps.Point(0, 2.8) },
+        label: competitorLabels ? { text: store.store_name, color: competitorLabelStyle === "band" ? "#111111" : "#075a9c", fontSize: "11px", fontWeight: "800", className: `competitor-marker-label ${competitorLabelStyle}` } : undefined,
       });
       marker.addListener("click", () => {
         if (!infoWindowRef.current) return;
@@ -136,7 +148,7 @@ export default function MapDashboard() {
       });
       competitorMarkersRef.current.push(marker);
     });
-  }, [competitors, competitorLabels, mapReady]);
+  }, [competitors, competitorLabels, competitorLabelStyle, competitorLabelOffset, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current; if (!map || !areas.length) return;
@@ -193,10 +205,15 @@ export default function MapDashboard() {
         <div className="candidate-panel"><div className="candidate-title"><MapPin size={15}/>候補地点</div><div className="coordinate-grid">
           <label><span>緯度</span><input inputMode="decimal" value={candidateLat} onChange={(e) => setCandidateLat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setCandidatePoint()}/></label>
           <label><span>経度</span><input inputMode="decimal" value={candidateLng} onChange={(e) => setCandidateLng(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setCandidatePoint()}/></label>
-        </div><button type="button" className="candidate-button" onClick={setCandidatePoint}><MapPin size={15}/>地図に設定</button></div>
+        </div><button type="button" className="candidate-button" onClick={setCandidatePoint}><MapPin size={15}/>地図に設定</button>
+          <div className="label-offset-control"><div><span>ラベル間隔</span><b>{candidateLabelOffset}px</b></div><Slider value={[candidateLabelOffset]} min={6} max={42} step={1} onValueChange={(value) => setCandidateLabelOffset(value[0] ?? 18)}/></div>
+        </div>
         <div className="toggle-row"><span>商圏（0.5・1・2km）</span><Switch checked={tradeAreas} onCheckedChange={setTradeAreas}/></div>
         <div className="trade-area-key"><span><i className="range-500"/>0.5km</span><span><i className="range-1000"/>1.0km</span><span><i className="range-2000"/>2.0km</span></div>
         <div className="toggle-row"><span>競合店舗名</span><Switch checked={competitorLabels} onCheckedChange={setCompetitorLabels}/></div>
+        <label className="compact-label">競合ラベル表示</label>
+        <Select value={competitorLabelStyle} onValueChange={(value) => setCompetitorLabelStyle(value as CompetitorLabelStyle)}><SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="band">緑帯・黒文字</SelectItem><SelectItem value="halo">青文字・白ハロー</SelectItem></SelectContent></Select>
+        <div className="label-offset-control competitor-offset"><div><span>ラベル間隔</span><b>{competitorLabelOffset}px</b></div><Slider value={[competitorLabelOffset]} min={6} max={42} step={1} onValueChange={(value) => setCompetitorLabelOffset(value[0] ?? 18)}/></div>
         <div className="competitor-key"><i/>競合店舗 {competitors.length}店</div><div className="divider" />
         <label className="field-label">色分け項目</label>
         <Select value={metric} onValueChange={(value) => setMetric(value as Metric)}><SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(metricLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
