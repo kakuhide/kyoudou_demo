@@ -23,7 +23,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.0.1";
+const appVersion = "Ver.1.0.3";
 
 function loadGoogleMaps(key: string) {
   if (window.google?.maps) return Promise.resolve();
@@ -107,7 +107,7 @@ export default function MapDashboard() {
       candidateMarkerRef.current = new window.google.maps.Marker({
         map: mapRef.current, position: defaultCandidate, title: "候補地点", zIndex: 10000, optimized: false,
         icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: "#f97316", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3, labelOrigin: new window.google.maps.Point(0, 2.8) },
-        label: { text: "候補地点", color: "#7c2d12", fontSize: "11px", fontWeight: "400", className: "candidate-marker-label" },
+        label: { text: "候補地点", color: "#7c2d12", fontSize: "11px", fontWeight: "800", className: "candidate-marker-label" },
       });
       tradeAreaCirclesRef.current = [
         { radius: 2000, color: "#ff4fa3", weight: 4, zIndex: 1 },
