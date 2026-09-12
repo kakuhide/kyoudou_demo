@@ -2,7 +2,7 @@
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 
-/* Ver 1.0.1 - Stylesheet */
+/* Ver 1.0.1 - Stylesheet (Translucent Fix) */
 :root { --navy:#123e67; --blue:#176eb1; --pale:#eef5fb; --line:#d5e0e9; --ink:#17324a; --muted:#657b8e; }
 * { box-sizing:border-box; }
 html, body { margin:0; height:100%; overflow:hidden; font-family:"Yu Gothic UI","Noto Sans JP",Arial,sans-serif; color:var(--ink); background:#f2f6f9; }
@@ -25,7 +25,7 @@ button,input { font:inherit; }
 .legend { margin-top:18px; padding:12px; border-radius:9px; background:#f5f8fa; }.legend .field-label { margin:0 0 8px; }.legend-scale { display:grid; grid-template-columns:repeat(5,1fr); height:11px; overflow:hidden; border-radius:4px; }.legend-label { display:flex; justify-content:space-between; margin-top:5px; color:var(--muted); font-size:11px; }.status { margin-top:18px; color:var(--muted); font-size:12px; line-height:1.5; }
 .map-wrap { position:relative; min-width:0; background:#dce7ee; }.map { width:100%; height:100%; }.map-badge { position:absolute; left:14px; top:14px; padding:8px 12px; border:1px solid #ffffffbb; border-radius:8px; background:#123e67e8; color:#fff; font-size:13px; font-weight:800; box-shadow:0 5px 16px #17324a38; }
 
-/* 競合店・候補地点ラベル (Ver 1.0.1 統一スタイル) */
+/* 競合店・候補地点ラベル (Ver 1.0.1 透過強調) */
 .area-label,
 .candidate-label {
   position: absolute;
@@ -33,16 +33,16 @@ button,input { font:inherit; }
   pointer-events: none;
   text-align: center;
   white-space: nowrap;
-  background-color: #c5f279;
+  background-color: rgba(197, 242, 121, 0.8) !important;
   border: none !important;
   border-radius: 8px;
   padding: 3px 8px;
-  color: #1a3300;
+  color: #1a3300 !important;
   font-size: 11px;
   font-weight: normal !important;
   line-height: 1.2;
   text-shadow: none !important;
-  opacity: 0.8;
+  opacity: 0.8 !important;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
 }
 
