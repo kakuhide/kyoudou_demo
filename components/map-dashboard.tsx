@@ -23,7 +23,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.0.0";
+const appVersion = "Ver.1.0.1";
 
 function loadGoogleMaps(key: string) {
   if (window.google?.maps) return Promise.resolve();
@@ -106,7 +106,7 @@ export default function MapDashboard() {
       infoWindowRef.current = new window.google.maps.InfoWindow();
       candidateMarkerRef.current = new window.google.maps.Marker({
         map: mapRef.current, position: defaultCandidate, title: "候補地点", zIndex: 10000, optimized: false,
-        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: "#f97316", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3, labelOrigin: new window.google.maps.Point(0, 2.8) },
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: "#f97316", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3, labelOrigin: new window.google.maps.Point(0, 2.1) },
         label: { text: "候補地点", color: "#7c2d12", fontSize: "12px", fontWeight: "800", className: "candidate-marker-label" },
       });
       tradeAreaCirclesRef.current = [
@@ -138,7 +138,7 @@ export default function MapDashboard() {
       const lat = Number(store.latitude); const lng = Number(store.longitude); if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const marker = new window.google.maps.Marker({
         map, position: { lat, lng }, title: store.store_name, zIndex: 800,
-        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: "#ffeb00", fillOpacity: 1, strokeColor: "#806f00", strokeWeight: 1.5, labelOrigin: new window.google.maps.Point(0, 2.8) },
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: "#ffeb00", fillOpacity: 1, strokeColor: "#806f00", strokeWeight: 1.5, labelOrigin: new window.google.maps.Point(0, 2.1) },
         label: competitorLabels ? { text: store.store_name, color: competitorLabelStyle === "band" ? "#111111" : "#075a9c", fontSize: "11px", fontWeight: "800", className: `competitor-marker-label ${competitorLabelStyle}` } : undefined,
       });
       marker.addListener("click", () => {
