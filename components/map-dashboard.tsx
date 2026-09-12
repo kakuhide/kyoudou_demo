@@ -28,7 +28,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.03";
+const appVersion = "Ver.1.04";
 const tradeAreaOrder = ["0.5km", "1.0km", "2.0km"] as const;
 
 function loadGoogleMaps(key: string) {
@@ -235,18 +235,27 @@ export default function MapDashboard() {
       const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
       const border = { top: { style: "thin", color: { argb: "FF9AA9B5" } }, left: { style: "thin", color: { argb: "FF9AA9B5" } }, bottom: { style: "thin", color: { argb: "FF9AA9B5" } }, right: { style: "thin", color: { argb: "FF9AA9B5" } } } as const;
 
-      const mapSheet = workbook.addWorksheet("Map", { pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1 } });
+      const mapSheet = workbook.addWorksheet("Map", { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1 } });
       mapSheet.columns = Array.from({ length: 14 }, () => ({ width: 11 }));
       mapSheet.mergeCells("A1:N1"); mapSheet.getCell("A1").value = "候補地点 商圏レポート";
       mapSheet.getCell("A1").font = { size: 18, bold: true, color: { argb: "FF173E67" } }; mapSheet.getCell("A1").alignment = { horizontal: "center" };
       mapSheet.mergeCells("A2:G2"); mapSheet.getCell("A2").value = `候補地点：${lat}, ${lng}`;
       mapSheet.mergeCells("H2:N2"); mapSheet.getCell("H2").value = `出力日時：${new Date().toLocaleString("ja-JP")}`; mapSheet.getCell("H2").alignment = { horizontal: "right" };
+      const map = mapRef.current; const originalCenter = map?.getCenter()?.toJSON(); const originalZoom = map?.getZoom();
+      const outerBounds = tradeAreaCirclesRef.current[0]?.getBounds();
+      if (map && outerBounds) {
+        map.fitBounds(outerBounds, 12);
+        await new Promise<void>((resolve) => window.google.maps.event.addListenerOnce(map, "idle", () => setTimeout(resolve, 250)));
+      }
       const canvas = await html2canvas(mapNode.current, { useCORS: true, allowTaint: false, backgroundColor: "#ffffff", logging: false, scale: 1 });
+      if (map && originalCenter && originalZoom != null) { map.setCenter(originalCenter); map.setZoom(originalZoom); }
       const mapImage = workbook.addImage({ base64: canvas.toDataURL("image/png"), extension: "png" });
-      mapSheet.addImage(mapImage, { tl: { col: 0, row: 3 }, ext: { width: 1080, height: 650 } });
-      mapSheet.pageSetup.printArea = "A1:N38";
+      const mapImageWidth = 1140; const mapImageHeight = Math.round(mapImageWidth * canvas.height / canvas.width);
+      mapSheet.addImage(mapImage, { tl: { col: 0, row: 3 }, ext: { width: mapImageWidth, height: mapImageHeight } });
+      mapSheet.pageSetup.printArea = `A1:N${Math.ceil(mapImageHeight / 20) + 4}`;
+      mapSheet.pageSetup.margins = { left: 0.15, right: 0.15, top: 0.2, bottom: 0.2, header: 0, footer: 0 };
 
-      const dataSheet = workbook.addWorksheet("Data", { views: [{ state: "frozen", ySplit: 1 }] });
+      const dataSheet = workbook.addWorksheet("Data", { views: [{ state: "frozen", ySplit: 1, showGridLines: false }] });
       dataSheet.autoFilter = "A1:N1";
       const dataHeaders = ["商圏", "中心からの距離(km)", "住所コード", "住所", "町丁目", "世帯数2025", "人口2025", "世帯数2023", "人口2023", "店舗", "デリ", "本部", "法人", "顧客合計"];
       dataSheet.addRow(dataHeaders);
@@ -254,12 +263,20 @@ export default function MapDashboard() {
       const areaRows = areas.map((area) => {
         const distance = distanceKm(center, centerOf(area.geom)); return { area, distance, band: tradeAreaName(distance) };
       }).filter((item) => item.band).sort((a, b) => tradeAreaOrder.indexOf(a.band as typeof tradeAreaOrder[number]) - tradeAreaOrder.indexOf(b.band as typeof tradeAreaOrder[number]) || a.distance - b.distance);
-      areaRows.forEach(({ area, distance, band }) => dataSheet.addRow([band, Number(distance.toFixed(3)), area.code, area.address, area.town2 ?? area.town, area.households_2025, area.population_2025, area.households_2023, area.population_2023, area.stores, area.delivery, area.headquarters, area.corporation, area.total]));
+      const summaryThresholds = [{ band: "0.5km", threshold: 0.5 }, { band: "1.0km", threshold: 1 }, { band: "2.0km", threshold: 2 }] as const;
+      summaryThresholds.forEach(({ band, threshold }) => {
+        areaRows.filter((item) => item.band === band).forEach(({ area, distance }) => dataSheet.addRow([band, Number(distance.toFixed(3)), area.code, area.address, area.town2 ?? area.town, area.households_2025, area.population_2025, area.households_2023, area.population_2023, area.stores, area.delivery, area.headquarters, area.corporation, area.total]));
+        const cumulative = areaRows.filter((item) => item.distance <= threshold);
+        const sum = (getter: (area: Area) => number | null) => cumulative.reduce((total, item) => total + Number(getter(item.area) ?? 0), 0);
+        const summaryRow = dataSheet.addRow([`0km～${band}合計`, "", "", "", "", sum((a) => a.households_2025), sum((a) => a.population_2025), sum((a) => a.households_2023), sum((a) => a.population_2023), sum((a) => a.stores), sum((a) => a.delivery), sum((a) => a.headquarters), sum((a) => a.corporation), sum((a) => a.total)]);
+        summaryRow.eachCell({ includeEmpty: true }, (cell) => { cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }; cell.font = { bold: true, color: { argb: "FF111111" } }; cell.border = border; });
+      });
       dataSheet.getRow(1).eachCell((cell) => { cell.fill = headerFill; cell.font = headerFont; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = border; });
       dataSheet.eachRow((row, rowNumber) => { if (rowNumber > 1) row.eachCell((cell) => { cell.border = border; }); });
       dataSheet.columns.forEach((column, index) => { column.width = [10, 18, 15, 28, 18, 13, 13, 13, 13, 10, 10, 10, 10, 12][index]; });
+      dataSheet.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printArea: `A1:N${dataSheet.rowCount}`, printTitlesRow: "1:1", margins: { left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 } };
 
-      const competitorSheet = workbook.addWorksheet("競合店", { views: [{ state: "frozen", ySplit: 1 }] });
+      const competitorSheet = workbook.addWorksheet("競合店", { views: [{ state: "frozen", ySplit: 1, showGridLines: false }] });
       competitorSheet.autoFilter = "A1:J1";
       competitorSheet.addRow(["商圏", "中心からの距離(km)", "店舗コード", "店舗名", "住所", "売場面積(㎡)", "駐車場台数", "開店時間", "閉店時間", "緯度経度"]);
       competitors.map((store) => {
@@ -270,6 +287,7 @@ export default function MapDashboard() {
       competitorSheet.getRow(1).eachCell((cell) => { cell.fill = headerFill; cell.font = headerFont; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = border; });
       competitorSheet.eachRow((row, rowNumber) => { if (rowNumber > 1) row.eachCell((cell) => { cell.border = border; }); });
       competitorSheet.columns.forEach((column, index) => { column.width = [10, 18, 15, 32, 34, 15, 14, 12, 12, 26][index]; });
+      competitorSheet.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printArea: `A1:J${Math.max(1, competitorSheet.rowCount)}`, printTitlesRow: "1:1", margins: { left: 0.2, right: 0.2, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 } };
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
