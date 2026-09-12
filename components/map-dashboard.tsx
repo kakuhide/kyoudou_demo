@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Layers3, MapPin, Search, UsersRound } from "lucide-react";
+import { FileSpreadsheet, Layers3, MapPin, Search, UsersRound } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 
@@ -16,14 +16,20 @@ type Area = {
   headquarters: number | null; corporation: number | null; total: number | null;
   geom: { type: string; coordinates: unknown };
 };
-type Competitor = { store_code: string; store_name: string; address: string | null; longitude: number; latitude: number };
+type Competitor = {
+  store_code: string; store_name: string; address: string | null;
+  sales_area_sqm: number | null; parking_spaces: number | null;
+  open_hour: number | null; close_hour: number | null;
+  longitude: number; latitude: number;
+};
 
 const metricLabels: Record<Metric, string> = {
   total: "顧客合計", households_2025: "世帯数 2025", population_2025: "人口 2025", stores: "店舗", delivery: "デリ",
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.02";
+const appVersion = "Ver.1.03";
+const tradeAreaOrder = ["0.5km", "1.0km", "2.0km"] as const;
 
 function loadGoogleMaps(key: string) {
   if (window.google?.maps) return Promise.resolve();
@@ -58,6 +64,22 @@ function valueColor(value: number, max: number) {
   return palette[Math.min(4, Math.floor((value / max) * 5))];
 }
 
+function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const toRad = (degree: number) => degree * Math.PI / 180;
+  const earthRadiusKm = 6371.0088;
+  const dLat = toRad(b.lat - a.lat); const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat); const lat2 = toRad(b.lat);
+  const value = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function tradeAreaName(distance: number) {
+  if (distance <= 0.5) return "0.5km";
+  if (distance <= 1) return "1.0km";
+  if (distance <= 2) return "2.0km";
+  return null;
+}
+
 export default function MapDashboard() {
   const mapNode = useRef<HTMLDivElement>(null); const mapRef = useRef<any>(null); const labelsRef = useRef<any[]>([]); const infoWindowRef = useRef<any>(null); const candidateMarkerRef = useRef<any>(null); const tradeAreaCirclesRef = useRef<any[]>([]); const competitorMarkersRef = useRef<any[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
@@ -72,6 +94,7 @@ export default function MapDashboard() {
   const [query, setQuery] = useState(""); const [status, setStatus] = useState("データを読み込んでいます…");
   const [candidateLat, setCandidateLat] = useState(String(defaultCandidate.lat));
   const [candidateLng, setCandidateLng] = useState(String(defaultCandidate.lng));
+  const [exporting, setExporting] = useState(false);
   const maxValue = useMemo(() => Math.max(1, ...areas.map((a) => Number(a[metric] ?? 0))), [areas, metric]);
   const matchedCount = useMemo(() => areas.filter((a) => a.address).length, [areas]);
 
@@ -87,7 +110,7 @@ export default function MapDashboard() {
   useEffect(() => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL; const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!url || !key) return;
-    fetch(`${url}/rest/v1/competitor_stores?select=store_code,store_name,address,longitude,latitude`, { headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "kyoudou" } })
+    fetch(`${url}/rest/v1/competitor_stores?select=store_code,store_name,address,sales_area_sqm,parking_spaces,open_hour,close_hour,longitude,latitude`, { headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "kyoudou" } })
       .then(async (res) => { if (!res.ok) throw new Error(await res.text()); return await res.json() as Competitor[]; })
       .then(setCompetitors)
       .catch((e) => setStatus(`競合店舗データ取得エラー：${e.message}`));
@@ -198,6 +221,69 @@ export default function MapDashboard() {
     setStatus(`候補地点を ${lat}, ${lng} に設定しました。`);
   }
 
+  async function exportExcelReport() {
+    const lat = Number(candidateLat); const lng = Number(candidateLng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !mapNode.current) {
+      setStatus("候補地点または地図を確認してから出力してください。"); return;
+    }
+    setExporting(true); setStatus("Excelレポートを作成しています…");
+    try {
+      const [{ Workbook }, { default: html2canvas }] = await Promise.all([import("exceljs"), import("html2canvas")]);
+      const workbook = new Workbook();
+      workbook.creator = "ArmBox Lab"; workbook.created = new Date();
+      const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF173E67" } } as const;
+      const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
+      const border = { top: { style: "thin", color: { argb: "FF9AA9B5" } }, left: { style: "thin", color: { argb: "FF9AA9B5" } }, bottom: { style: "thin", color: { argb: "FF9AA9B5" } }, right: { style: "thin", color: { argb: "FF9AA9B5" } } } as const;
+
+      const mapSheet = workbook.addWorksheet("Map", { pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1 } });
+      mapSheet.columns = Array.from({ length: 14 }, () => ({ width: 11 }));
+      mapSheet.mergeCells("A1:N1"); mapSheet.getCell("A1").value = "候補地点 商圏レポート";
+      mapSheet.getCell("A1").font = { size: 18, bold: true, color: { argb: "FF173E67" } }; mapSheet.getCell("A1").alignment = { horizontal: "center" };
+      mapSheet.mergeCells("A2:G2"); mapSheet.getCell("A2").value = `候補地点：${lat}, ${lng}`;
+      mapSheet.mergeCells("H2:N2"); mapSheet.getCell("H2").value = `出力日時：${new Date().toLocaleString("ja-JP")}`; mapSheet.getCell("H2").alignment = { horizontal: "right" };
+      const canvas = await html2canvas(mapNode.current, { useCORS: true, allowTaint: false, backgroundColor: "#ffffff", logging: false, scale: 1 });
+      const mapImage = workbook.addImage({ base64: canvas.toDataURL("image/png"), extension: "png" });
+      mapSheet.addImage(mapImage, { tl: { col: 0, row: 3 }, ext: { width: 1080, height: 650 } });
+      mapSheet.pageSetup.printArea = "A1:N38";
+
+      const dataSheet = workbook.addWorksheet("Data", { views: [{ state: "frozen", ySplit: 1 }] });
+      dataSheet.autoFilter = "A1:N1";
+      const dataHeaders = ["商圏", "中心からの距離(km)", "住所コード", "住所", "町丁目", "世帯数2025", "人口2025", "世帯数2023", "人口2023", "店舗", "デリ", "本部", "法人", "顧客合計"];
+      dataSheet.addRow(dataHeaders);
+      const center = { lat, lng };
+      const areaRows = areas.map((area) => {
+        const distance = distanceKm(center, centerOf(area.geom)); return { area, distance, band: tradeAreaName(distance) };
+      }).filter((item) => item.band).sort((a, b) => tradeAreaOrder.indexOf(a.band as typeof tradeAreaOrder[number]) - tradeAreaOrder.indexOf(b.band as typeof tradeAreaOrder[number]) || a.distance - b.distance);
+      areaRows.forEach(({ area, distance, band }) => dataSheet.addRow([band, Number(distance.toFixed(3)), area.code, area.address, area.town2 ?? area.town, area.households_2025, area.population_2025, area.households_2023, area.population_2023, area.stores, area.delivery, area.headquarters, area.corporation, area.total]));
+      dataSheet.getRow(1).eachCell((cell) => { cell.fill = headerFill; cell.font = headerFont; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = border; });
+      dataSheet.eachRow((row, rowNumber) => { if (rowNumber > 1) row.eachCell((cell) => { cell.border = border; }); });
+      dataSheet.columns.forEach((column, index) => { column.width = [10, 18, 15, 28, 18, 13, 13, 13, 13, 10, 10, 10, 10, 12][index]; });
+
+      const competitorSheet = workbook.addWorksheet("競合店", { views: [{ state: "frozen", ySplit: 1 }] });
+      competitorSheet.autoFilter = "A1:J1";
+      competitorSheet.addRow(["商圏", "中心からの距離(km)", "店舗コード", "店舗名", "住所", "売場面積(㎡)", "駐車場台数", "開店時間", "閉店時間", "緯度経度"]);
+      competitors.map((store) => {
+        const distance = distanceKm(center, { lat: Number(store.latitude), lng: Number(store.longitude) });
+        return { store, distance, band: tradeAreaName(distance) };
+      }).filter((item) => item.band).sort((a, b) => tradeAreaOrder.indexOf(a.band as typeof tradeAreaOrder[number]) - tradeAreaOrder.indexOf(b.band as typeof tradeAreaOrder[number]) || a.distance - b.distance)
+        .forEach(({ store, distance, band }) => competitorSheet.addRow([band, Number(distance.toFixed(3)), store.store_code, store.store_name, store.address, store.sales_area_sqm, store.parking_spaces, store.open_hour, store.close_hour, `${store.latitude}, ${store.longitude}`]));
+      competitorSheet.getRow(1).eachCell((cell) => { cell.fill = headerFill; cell.font = headerFont; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = border; });
+      competitorSheet.eachRow((row, rowNumber) => { if (rowNumber > 1) row.eachCell((cell) => { cell.border = border; }); });
+      competitorSheet.columns.forEach((column, index) => { column.width = [10, 18, 15, 32, 34, 15, 14, 12, 12, 26][index]; });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const downloadUrl = URL.createObjectURL(blob); const anchor = document.createElement("a");
+      anchor.href = downloadUrl; anchor.download = `ArmBox_商圏レポート_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.xlsx`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(downloadUrl);
+      setStatus(`Excelレポートを出力しました（町丁目${areaRows.length}件）`);
+    } catch (error) {
+      setStatus(`Excel出力エラー：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return <main className="app-shell">
     <header className="topbar"><div className="brand"><div className="brand-mark">A</div><div><b>ArmBox Lab</b><span>機能開発・検証サイト</span></div></div><div className="top-stats"><span><MapPin size={16}/>{areas.length || "—"} 町丁目</span><span><UsersRound size={16}/>{matchedCount || "—"} データ対象</span></div></header>
     <section className="workspace">
@@ -222,6 +308,7 @@ export default function MapDashboard() {
         <div className={`stroke-control ${polygons ? "" : "disabled"}`}><div><span>境界線の太さ</span><b>{strokeWeight}px</b></div><Slider value={[strokeWeight]} min={1} max={6} step={0.5} onValueChange={(value) => setStrokeWeight(value[0] ?? 2)} disabled={!polygons}/></div>
         <div className="toggle-row"><span>町丁目ラベル</span><Switch checked={labels} onCheckedChange={setLabels}/></div><div className="divider" />
         <label className="field-label">町丁目検索</label><div className="search-box"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && searchArea()} placeholder="例：桜区西堀"/><button onClick={searchArea} aria-label="検索"><Search size={17}/></button></div>
+        <button type="button" className="excel-button" onClick={exportExcelReport} disabled={exporting}><FileSpreadsheet size={17}/>{exporting ? "作成中…" : "Excelレポート出力"}</button>
         <div className="legend"><div className="field-label">凡例：{metricLabels[metric]}</div><div className="legend-scale">{palette.map((color) => <i key={color} style={{background: color}} />)}</div><div className="legend-label"><span>少ない</span><span>多い</span></div></div><p className="status">{status}</p><div className="version-info">{appVersion}</div>
       </aside>
       <div className="map-wrap"><div ref={mapNode} className="map"/></div>
