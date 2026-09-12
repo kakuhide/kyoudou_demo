@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layers3, MapPin, Search, UsersRound } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 
 declare global { interface Window { google: any; __kyoudouMapReady?: () => void } }
 
 type Metric = "total" | "households_2025" | "population_2025" | "stores" | "delivery";
+type CompetitorLabelStyle = "band" | "halo";
 type Area = {
   id: number; code: string; address: string | null; municipality_town: string | null; town: string | null; town2: string | null;
   households_2025: number | null; population_2025: number | null; households_2023: number | null;
@@ -16,11 +16,14 @@ type Area = {
   headquarters: number | null; corporation: number | null; total: number | null;
   geom: { type: string; coordinates: unknown };
 };
+type Competitor = { store_code: string; store_name: string; address: string | null; longitude: number; latitude: number };
 
 const metricLabels: Record<Metric, string> = {
   total: "顧客合計", households_2025: "世帯数 2025", population_2025: "人口 2025", stores: "店舗", delivery: "デリ",
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
+const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
+const appVersion = "Ver.1.0.1";
 
 function loadGoogleMaps(key: string) {
   if (window.google?.maps) return Promise.resolve();
@@ -56,11 +59,19 @@ function valueColor(value: number, max: number) {
 }
 
 export default function MapDashboard() {
-  const mapNode = useRef<HTMLDivElement>(null); const mapRef = useRef<any>(null); const labelsRef = useRef<any[]>([]); const infoWindowRef = useRef<any>(null);
+  const mapNode = useRef<HTMLDivElement>(null); const mapRef = useRef<any>(null); const labelsRef = useRef<any[]>([]); const infoWindowRef = useRef<any>(null); const candidateMarkerRef = useRef<any>(null); const tradeAreaCirclesRef = useRef<any[]>([]); const competitorMarkersRef = useRef<any[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
-  const [metric, setMetric] = useState<Metric>("total"); const [labels, setLabels] = useState(true); const [fills, setFills] = useState(true);
+  const [competitors, setCompetitors] = useState<Competitor[]>([]);
+  const [mapReady, setMapReady] = useState(false);
+  const [metric, setMetric] = useState<Metric>("total"); const [labels, setLabels] = useState(true); const [fills, setFills] = useState(false);
   const [polygons, setPolygons] = useState(true); const [strokeWeight, setStrokeWeight] = useState(2);
+  const [tradeAreas, setTradeAreas] = useState(true); const [competitorLabels, setCompetitorLabels] = useState(true);
+  const [competitorLabelStyle, setCompetitorLabelStyle] = useState<CompetitorLabelStyle>("band");
+  const [competitorLabelOffset, setCompetitorLabelOffset] = useState(2);
+  const [candidateLabelOffset, setCandidateLabelOffset] = useState(2);
   const [query, setQuery] = useState(""); const [status, setStatus] = useState("データを読み込んでいます…");
+  const [candidateLat, setCandidateLat] = useState(String(defaultCandidate.lat));
+  const [candidateLng, setCandidateLng] = useState(String(defaultCandidate.lng));
   const maxValue = useMemo(() => Math.max(1, ...areas.map((a) => Number(a[metric] ?? 0))), [areas, metric]);
   const matchedCount = useMemo(() => areas.filter((a) => a.address).length, [areas]);
 
@@ -74,18 +85,70 @@ export default function MapDashboard() {
   }, []);
 
   useEffect(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL; const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) return;
+    fetch(`${url}/rest/v1/competitor_stores?select=store_code,store_name,address,longitude,latitude`, { headers: { apikey: key, Authorization: `Bearer ${key}`, "Accept-Profile": "kyoudou" } })
+      .then(async (res) => { if (!res.ok) throw new Error(await res.text()); return await res.json() as Competitor[]; })
+      .then(setCompetitors)
+      .catch((e) => setStatus(`競合店舗データ取得エラー：${e.message}`));
+  }, []);
+
+  useEffect(() => {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!key || !mapNode.current) { if (!key) setStatus("Google Maps APIキーを設定してください。"); return; }
     loadGoogleMaps(key).then(() => {
       if (!mapNode.current || mapRef.current) return;
       mapRef.current = new window.google.maps.Map(mapNode.current, {
-        center: { lat: 35.872, lng: 139.648 }, zoom: 11, mapTypeControl: false, streetViewControl: false,
+        center: defaultCandidate, zoom: 14, mapTypeControl: false, streetViewControl: false,
         fullscreenControl: false, clickableIcons: false, gestureHandling: "greedy",
         styles: [{ featureType: "poi", stylers: [{ visibility: "off" }] }],
       });
       infoWindowRef.current = new window.google.maps.InfoWindow();
+      candidateMarkerRef.current = new window.google.maps.Marker({
+        map: mapRef.current, position: defaultCandidate, title: "候補地点", zIndex: 10000, optimized: false,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: "#f97316", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 3, labelOrigin: new window.google.maps.Point(0, 2.1) },
+        label: { text: "候補地点", color: "#7c2d12", fontSize: "12px", fontWeight: "800", className: "candidate-marker-label" },
+      });
+      tradeAreaCirclesRef.current = [
+        { radius: 2000, color: "#ff4fa3", weight: 4, zIndex: 1 },
+        { radius: 1000, color: "#ef1919", weight: 4, zIndex: 2 },
+        { radius: 500, color: "#8b0000", weight: 4, zIndex: 3 },
+      ].map((item) => {
+        const circle = new window.google.maps.Circle({ map: mapRef.current, radius: item.radius, strokeColor: item.color, strokeOpacity: 1, strokeWeight: item.weight, fillColor: item.color, fillOpacity: 0, clickable: false, zIndex: item.zIndex });
+        circle.bindTo("center", candidateMarkerRef.current, "position"); return circle;
+      });
+      setMapReady(true);
     }).catch((e) => setStatus(e.message));
   }, []);
+
+  useEffect(() => { tradeAreaCirclesRef.current.forEach((circle) => circle.setMap(tradeAreas ? mapRef.current : null)); }, [tradeAreas, mapReady]);
+
+  useEffect(() => {
+    mapNode.current?.style.setProperty("--candidate-label-offset", `${candidateLabelOffset}px`);
+  }, [candidateLabelOffset]);
+
+  useEffect(() => {
+    mapNode.current?.style.setProperty("--competitor-label-offset", `${competitorLabelOffset}px`);
+  }, [competitorLabelOffset]);
+
+  useEffect(() => {
+    const map = mapRef.current; if (!map) return;
+    competitorMarkersRef.current.forEach((marker) => marker.setMap(null)); competitorMarkersRef.current = [];
+    competitors.forEach((store) => {
+      const lat = Number(store.latitude); const lng = Number(store.longitude); if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      const marker = new window.google.maps.Marker({
+        map, position: { lat, lng }, title: store.store_name, zIndex: 800,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: "#ffeb00", fillOpacity: 1, strokeColor: "#806f00", strokeWeight: 1.5, labelOrigin: new window.google.maps.Point(0, 2.1) },
+        label: competitorLabels ? { text: store.store_name, color: competitorLabelStyle === "band" ? "#111111" : "#075a9c", fontSize: "11px", fontWeight: "800", className: `competitor-marker-label ${competitorLabelStyle}` } : undefined,
+      });
+      marker.addListener("click", () => {
+        if (!infoWindowRef.current) return;
+        infoWindowRef.current.setContent(`<div class="map-info"><b>${store.store_name}</b><span>${store.address ?? ""}</span></div>`);
+        infoWindowRef.current.open({ map, anchor: marker });
+      });
+      competitorMarkersRef.current.push(marker);
+    });
+  }, [competitors, competitorLabels, competitorLabelStyle, competitorLabelOffset, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current; if (!map || !areas.length) return;
@@ -105,7 +168,7 @@ export default function MapDashboard() {
     class AreaLabel extends window.google.maps.OverlayView {
       position: any; text: string; div?: HTMLDivElement;
       constructor(position: any, text: string) { super(); this.position = position; this.text = text; }
-      onAdd() { this.div = document.createElement("div"); this.div.className = "area-label"; this.div.innerHTML = this.text; this.getPanes()?.overlayMouseTarget.appendChild(this.div); }
+      onAdd() { this.div = document.createElement("div"); this.div.className = "area-label"; this.div.innerHTML = this.text; this.getPanes()?.overlayLayer.appendChild(this.div); }
       draw() { const p = this.getProjection().fromLatLngToDivPixel(this.position); if (this.div && p) { this.div.style.left = `${p.x}px`; this.div.style.top = `${p.y}px`; } }
       onRemove() { this.div?.remove(); }
     }
@@ -124,19 +187,44 @@ export default function MapDashboard() {
     mapRef.current.panTo(centerOf(area.geom)); mapRef.current.setZoom(14); setStatus(`${area.address ?? area.code}を表示`);
   }
 
+  function setCandidatePoint() {
+    const lat = Number(candidateLat); const lng = Number(candidateLng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setStatus("候補地点の緯度・経度を正しく入力してください。"); return;
+    }
+    if (!mapRef.current || !candidateMarkerRef.current) { setStatus("地図を読み込み中です。少し待ってからお試しください。"); return; }
+    const position = { lat, lng };
+    candidateMarkerRef.current.setPosition(position); mapRef.current.panTo(position); mapRef.current.setZoom(15);
+    setStatus(`候補地点を ${lat}, ${lng} に設定しました。`);
+  }
+
   return <main className="app-shell">
     <header className="topbar"><div className="brand"><div className="brand-mark">A</div><div><b>ArmBox Lab</b><span>機能開発・検証サイト</span></div></div><div className="top-stats"><span><MapPin size={16}/>{areas.length || "—"} 町丁目</span><span><UsersRound size={16}/>{matchedCount || "—"} データ対象</span></div></header>
     <section className="workspace">
-      <aside className="sidebar"><div className="section-title"><Layers3 size={17}/>表示設定</div><label className="field-label">色分け項目</label>
-        <Select value={metric} onValueChange={(value) => setMetric(value as Metric)}><SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(metricLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
+      <aside className="sidebar"><div className="section-title"><Layers3 size={17}/>表示設定</div>
+        <div className="candidate-panel"><div className="candidate-title"><MapPin size={15}/>候補地点</div><div className="coordinate-grid">
+          <label><span>緯度</span><input inputMode="decimal" value={candidateLat} onChange={(e) => setCandidateLat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setCandidatePoint()}/></label>
+          <label><span>経度</span><input inputMode="decimal" value={candidateLng} onChange={(e) => setCandidateLng(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setCandidatePoint()}/></label>
+        </div><button type="button" className="candidate-button" onClick={setCandidatePoint}><MapPin size={15}/>地図に設定</button>
+          <div className="label-offset-control"><div><span>ラベル間隔</span><b>{candidateLabelOffset}px</b></div><Slider value={[candidateLabelOffset]} min={0} max={14} step={1} onValueChange={(value) => setCandidateLabelOffset(value[0] ?? 2)}/></div>
+        </div>
+        <div className="toggle-row"><span>商圏（0.5・1・2km）</span><Switch checked={tradeAreas} onCheckedChange={setTradeAreas}/></div>
+        <div className="trade-area-key"><span><i className="range-500"/>0.5km</span><span><i className="range-1000"/>1.0km</span><span><i className="range-2000"/>2.0km</span></div>
+        <div className="toggle-row"><span>競合店舗名</span><Switch checked={competitorLabels} onCheckedChange={setCompetitorLabels}/></div>
+        <label className="compact-label">競合ラベル表示</label>
+        <select className="native-select" value={competitorLabelStyle} onChange={(event) => setCompetitorLabelStyle(event.target.value as CompetitorLabelStyle)}><option value="band">緑帯・黒文字</option><option value="halo">青文字・白ハロー</option></select>
+        <div className="label-offset-control competitor-offset"><div><span>ラベル間隔</span><b>{competitorLabelOffset}px</b></div><Slider value={[competitorLabelOffset]} min={0} max={14} step={1} onValueChange={(value) => setCompetitorLabelOffset(value[0] ?? 2)}/></div>
+        <div className="competitor-key"><i/>競合店舗 {competitors.length}店</div><div className="divider" />
+        <label className="field-label">色分け項目</label>
+        <select className="native-select" value={metric} onChange={(event) => setMetric(event.target.value as Metric)}>{Object.entries(metricLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
         <div className="toggle-row"><span>数値による色分け</span><Switch checked={fills} onCheckedChange={setFills}/></div>
         <div className="toggle-row"><span>町丁目ポリゴン</span><Switch checked={polygons} onCheckedChange={setPolygons}/></div>
         <div className={`stroke-control ${polygons ? "" : "disabled"}`}><div><span>境界線の太さ</span><b>{strokeWeight}px</b></div><Slider value={[strokeWeight]} min={1} max={6} step={0.5} onValueChange={(value) => setStrokeWeight(value[0] ?? 2)} disabled={!polygons}/></div>
         <div className="toggle-row"><span>町丁目ラベル</span><Switch checked={labels} onCheckedChange={setLabels}/></div><div className="divider" />
         <label className="field-label">町丁目検索</label><div className="search-box"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && searchArea()} placeholder="例：桜区西堀"/><button onClick={searchArea} aria-label="検索"><Search size={17}/></button></div>
-        <div className="legend"><div className="field-label">凡例：{metricLabels[metric]}</div><div className="legend-scale">{palette.map((color) => <i key={color} style={{background: color}} />)}</div><div className="legend-label"><span>少ない</span><span>多い</span></div></div><p className="status">{status}</p>
+        <div className="legend"><div className="field-label">凡例：{metricLabels[metric]}</div><div className="legend-scale">{palette.map((color) => <i key={color} style={{background: color}} />)}</div><div className="legend-label"><span>少ない</span><span>多い</span></div></div><p className="status">{status}</p><div className="version-info">{appVersion}</div>
       </aside>
-      <div className="map-wrap"><div ref={mapNode} className="map"/><div className="map-badge">さいたま市 町丁目分析</div></div>
+      <div className="map-wrap"><div ref={mapNode} className="map"/></div>
     </section>
   </main>;
 }
