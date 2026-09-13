@@ -28,7 +28,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.07";
+const appVersion = "Ver.1.08";
 const tradeAreaOrder = ["0.5km", "1.0km", "2.0km"] as const;
 
 function loadGoogleMaps(key: string) {
@@ -262,7 +262,7 @@ export default function MapDashboard() {
       const context = reportCanvas.getContext("2d");
       if (!context) throw new Error("地図画像を作成できませんでした。");
       context.fillStyle = "#fff"; context.fillRect(0, 0, reportCanvas.width, reportCanvas.height);
-      const cropScale = 1.10; const cropWidth = 1200 / cropScale; const cropHeight = 760 / cropScale;
+      const cropScale = 1.18; const cropWidth = 1200 / cropScale; const cropHeight = 760 / cropScale;
       context.drawImage(capturedMap, (1200 - cropWidth) / 2, (760 - cropHeight) / 2, cropWidth, cropHeight, 0, 0, 1200, 760);
       context.strokeStyle = "#111"; context.lineWidth = 2; context.strokeRect(0, 0, 1419, 759); context.beginPath(); context.moveTo(1200, 0); context.lineTo(1200, 760); context.stroke();
       const legendX = 1220;
