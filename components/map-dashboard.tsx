@@ -28,7 +28,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.05";
+const appVersion = "Ver.1.06";
 const tradeAreaOrder = ["0.5km", "1.0km", "2.0km"] as const;
 
 function loadGoogleMaps(key: string) {
@@ -258,21 +258,23 @@ export default function MapDashboard() {
         window.google.maps.event.trigger(map, "resize");
         if (originalCenter && originalZoom != null) { map.setCenter(originalCenter); map.setZoom(originalZoom); }
       }
-      const reportCanvas = document.createElement("canvas"); reportCanvas.width = 1380; reportCanvas.height = 760;
+      const reportCanvas = document.createElement("canvas"); reportCanvas.width = 1420; reportCanvas.height = 760;
       const context = reportCanvas.getContext("2d");
       if (!context) throw new Error("地図画像を作成できませんでした。");
       context.fillStyle = "#fff"; context.fillRect(0, 0, reportCanvas.width, reportCanvas.height);
-      context.drawImage(capturedMap, 0, 0, 1200, 760);
-      context.strokeStyle = "#111"; context.lineWidth = 2; context.strokeRect(0, 0, 1379, 759); context.beginPath(); context.moveTo(1200, 0); context.lineTo(1200, 760); context.stroke();
-      context.fillStyle = "#111"; context.font = 'bold 20px "Yu Gothic UI", sans-serif'; context.fillText("凡例", 1220, 50);
-      context.lineWidth = 4; context.beginPath(); context.moveTo(1220, 92); context.lineTo(1270, 92); context.stroke();
-      context.font = '16px "Yu Gothic UI", sans-serif'; context.fillText("町丁目境界", 1280, 98);
-      context.font = '13px "Yu Gothic UI", sans-serif'; context.textAlign = "center"; context.fillText("町丁目名", 1250, 145); context.fillText("世帯数", 1250, 163); context.fillText("顧客合計", 1250, 181);
-      context.textAlign = "left"; context.font = '16px "Yu Gothic UI", sans-serif'; context.fillText("町丁目ラベル", 1280, 165);
-      context.fillStyle = "#ffeb00"; context.strokeStyle = "#806f00"; context.lineWidth = 1; context.beginPath(); context.arc(1245, 222, 9, 0, Math.PI * 2); context.fill(); context.stroke();
-      context.fillStyle = "#111"; context.fillText("競合店舗", 1280, 228);
-      const scaleBarPixels = Math.round(1000 / metersPerPixel); const scaleX = 1220; const scaleY = 690;
-      context.font = 'bold 20px Arial, sans-serif'; context.fillText("1:25,000", 1220, 640);
+      const cropScale = 1.25; const cropWidth = 1200 / cropScale; const cropHeight = 760 / cropScale;
+      context.drawImage(capturedMap, (1200 - cropWidth) / 2, (760 - cropHeight) / 2, cropWidth, cropHeight, 0, 0, 1200, 760);
+      context.strokeStyle = "#111"; context.lineWidth = 2; context.strokeRect(0, 0, 1419, 759); context.beginPath(); context.moveTo(1200, 0); context.lineTo(1200, 760); context.stroke();
+      const legendX = 1220;
+      context.fillStyle = "#111"; context.font = 'bold 18px "Yu Gothic UI", sans-serif'; context.fillText("凡例", legendX, 475);
+      context.lineWidth = 4; context.beginPath(); context.moveTo(legendX, 515); context.lineTo(legendX + 46, 515); context.stroke();
+      context.font = '15px "Yu Gothic UI", sans-serif'; context.fillText("町丁目境界", legendX + 58, 521);
+      context.font = '12px "Yu Gothic UI", sans-serif'; context.textAlign = "center"; context.fillText("町丁目名", legendX + 25, 556); context.fillText("世帯数", legendX + 25, 572); context.fillText("顧客合計", legendX + 25, 588);
+      context.textAlign = "left"; context.font = '15px "Yu Gothic UI", sans-serif'; context.fillText("町丁目ラベル", legendX + 58, 576);
+      context.fillStyle = "#ffeb00"; context.strokeStyle = "#806f00"; context.lineWidth = 1; context.beginPath(); context.arc(legendX + 25, 622, 9, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = "#111"; context.fillText("競合店舗", legendX + 58, 628);
+      const scaleBarPixels = Math.round(1000 / metersPerPixel * cropScale); const scaleX = legendX; const scaleY = 710;
+      context.font = 'bold 18px Arial, sans-serif'; context.fillText("1:25,000", legendX, 675);
       context.lineWidth = 3; context.strokeStyle = "#111"; context.beginPath(); context.moveTo(scaleX, scaleY); context.lineTo(scaleX + scaleBarPixels, scaleY); context.moveTo(scaleX, scaleY - 10); context.lineTo(scaleX, scaleY + 10); context.moveTo(scaleX + scaleBarPixels / 2, scaleY - 7); context.lineTo(scaleX + scaleBarPixels / 2, scaleY + 7); context.moveTo(scaleX + scaleBarPixels, scaleY - 10); context.lineTo(scaleX + scaleBarPixels, scaleY + 10); context.stroke();
       context.font = '12px Arial, sans-serif'; context.fillText("0", scaleX - 3, scaleY + 27); context.textAlign = "center"; context.fillText("0.5", scaleX + scaleBarPixels / 2, scaleY + 27); context.textAlign = "right"; context.fillText("1.0km", scaleX + scaleBarPixels + 3, scaleY + 27);
       const mapImage = workbook.addImage({ base64: reportCanvas.toDataURL("image/png"), extension: "png" });
