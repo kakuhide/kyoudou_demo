@@ -28,7 +28,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.04";
+const appVersion = "Ver.1.05";
 const tradeAreaOrder = ["0.5km", "1.0km", "2.0km"] as const;
 
 function loadGoogleMaps(key: string) {
@@ -237,20 +237,46 @@ export default function MapDashboard() {
 
       const mapSheet = workbook.addWorksheet("Map", { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1 } });
       mapSheet.columns = Array.from({ length: 14 }, () => ({ width: 11 }));
-      mapSheet.mergeCells("A1:N1"); mapSheet.getCell("A1").value = "候補地点 商圏レポート";
+      mapSheet.mergeCells("A1:N1"); mapSheet.getCell("A1").value = "候補地点 商圏レポート　1:25,000";
       mapSheet.getCell("A1").font = { size: 18, bold: true, color: { argb: "FF173E67" } }; mapSheet.getCell("A1").alignment = { horizontal: "center" };
       mapSheet.mergeCells("A2:G2"); mapSheet.getCell("A2").value = `候補地点：${lat}, ${lng}`;
       mapSheet.mergeCells("H2:N2"); mapSheet.getCell("H2").value = `出力日時：${new Date().toLocaleString("ja-JP")}`; mapSheet.getCell("H2").alignment = { horizontal: "right" };
-      const map = mapRef.current; const originalCenter = map?.getCenter()?.toJSON(); const originalZoom = map?.getZoom();
-      const outerBounds = tradeAreaCirclesRef.current[0]?.getBounds();
-      if (map && outerBounds) {
-        map.fitBounds(outerBounds, 12);
-        await new Promise<void>((resolve) => window.google.maps.event.addListenerOnce(map, "idle", () => setTimeout(resolve, 250)));
+      const map = mapRef.current; const mapElement = mapNode.current;
+      const originalCenter = map?.getCenter()?.toJSON(); const originalZoom = map?.getZoom();
+      const originalWidth = mapElement.style.width; const originalHeight = mapElement.style.height;
+      const metersPerPixel = 25000 * 0.0254 / 96;
+      let capturedMap: HTMLCanvasElement;
+      try {
+        mapElement.style.width = "1200px"; mapElement.style.height = "760px";
+        window.google.maps.event.trigger(map, "resize");
+        const exportZoom = Math.log2((Math.cos(lat * Math.PI / 180) * 2 * Math.PI * 6378137) / (256 * metersPerPixel));
+        map.setOptions({ isFractionalZoomEnabled: true }); map.setCenter({ lat, lng }); map.setZoom(exportZoom);
+        await new Promise<void>((resolve) => window.google.maps.event.addListenerOnce(map, "idle", () => setTimeout(resolve, 300)));
+        capturedMap = await html2canvas(mapElement, { useCORS: true, allowTaint: false, backgroundColor: "#ffffff", logging: false, scale: 1, width: 1200, height: 760 });
+      } finally {
+        mapElement.style.width = originalWidth; mapElement.style.height = originalHeight;
+        window.google.maps.event.trigger(map, "resize");
+        if (originalCenter && originalZoom != null) { map.setCenter(originalCenter); map.setZoom(originalZoom); }
       }
-      const canvas = await html2canvas(mapNode.current, { useCORS: true, allowTaint: false, backgroundColor: "#ffffff", logging: false, scale: 1 });
-      if (map && originalCenter && originalZoom != null) { map.setCenter(originalCenter); map.setZoom(originalZoom); }
-      const mapImage = workbook.addImage({ base64: canvas.toDataURL("image/png"), extension: "png" });
-      const mapImageWidth = 1140; const mapImageHeight = Math.round(mapImageWidth * canvas.height / canvas.width);
+      const reportCanvas = document.createElement("canvas"); reportCanvas.width = 1380; reportCanvas.height = 760;
+      const context = reportCanvas.getContext("2d");
+      if (!context) throw new Error("地図画像を作成できませんでした。");
+      context.fillStyle = "#fff"; context.fillRect(0, 0, reportCanvas.width, reportCanvas.height);
+      context.drawImage(capturedMap, 0, 0, 1200, 760);
+      context.strokeStyle = "#111"; context.lineWidth = 2; context.strokeRect(0, 0, 1379, 759); context.beginPath(); context.moveTo(1200, 0); context.lineTo(1200, 760); context.stroke();
+      context.fillStyle = "#111"; context.font = 'bold 20px "Yu Gothic UI", sans-serif'; context.fillText("凡例", 1220, 50);
+      context.lineWidth = 4; context.beginPath(); context.moveTo(1220, 92); context.lineTo(1270, 92); context.stroke();
+      context.font = '16px "Yu Gothic UI", sans-serif'; context.fillText("町丁目境界", 1280, 98);
+      context.font = '13px "Yu Gothic UI", sans-serif'; context.textAlign = "center"; context.fillText("町丁目名", 1250, 145); context.fillText("世帯数", 1250, 163); context.fillText("顧客合計", 1250, 181);
+      context.textAlign = "left"; context.font = '16px "Yu Gothic UI", sans-serif'; context.fillText("町丁目ラベル", 1280, 165);
+      context.fillStyle = "#ffeb00"; context.strokeStyle = "#806f00"; context.lineWidth = 1; context.beginPath(); context.arc(1245, 222, 9, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = "#111"; context.fillText("競合店舗", 1280, 228);
+      const scaleBarPixels = Math.round(1000 / metersPerPixel); const scaleX = 1220; const scaleY = 690;
+      context.font = 'bold 20px Arial, sans-serif'; context.fillText("1:25,000", 1220, 640);
+      context.lineWidth = 3; context.strokeStyle = "#111"; context.beginPath(); context.moveTo(scaleX, scaleY); context.lineTo(scaleX + scaleBarPixels, scaleY); context.moveTo(scaleX, scaleY - 10); context.lineTo(scaleX, scaleY + 10); context.moveTo(scaleX + scaleBarPixels / 2, scaleY - 7); context.lineTo(scaleX + scaleBarPixels / 2, scaleY + 7); context.moveTo(scaleX + scaleBarPixels, scaleY - 10); context.lineTo(scaleX + scaleBarPixels, scaleY + 10); context.stroke();
+      context.font = '12px Arial, sans-serif'; context.fillText("0", scaleX - 3, scaleY + 27); context.textAlign = "center"; context.fillText("0.5", scaleX + scaleBarPixels / 2, scaleY + 27); context.textAlign = "right"; context.fillText("1.0km", scaleX + scaleBarPixels + 3, scaleY + 27);
+      const mapImage = workbook.addImage({ base64: reportCanvas.toDataURL("image/png"), extension: "png" });
+      const mapImageWidth = 1140; const mapImageHeight = Math.round(mapImageWidth * reportCanvas.height / reportCanvas.width);
       mapSheet.addImage(mapImage, { tl: { col: 0, row: 3 }, ext: { width: mapImageWidth, height: mapImageHeight } });
       mapSheet.pageSetup.printArea = `A1:N${Math.ceil(mapImageHeight / 20) + 4}`;
       mapSheet.pageSetup.margins = { left: 0.15, right: 0.15, top: 0.2, bottom: 0.2, header: 0, footer: 0 };
