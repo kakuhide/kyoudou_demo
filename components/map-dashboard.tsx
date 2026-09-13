@@ -235,12 +235,6 @@ export default function MapDashboard() {
       const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
       const border = { top: { style: "thin", color: { argb: "FF9AA9B5" } }, left: { style: "thin", color: { argb: "FF9AA9B5" } }, bottom: { style: "thin", color: { argb: "FF9AA9B5" } }, right: { style: "thin", color: { argb: "FF9AA9B5" } } } as const;
 
-      const mapSheet = workbook.addWorksheet("Map", { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1 } });
-      mapSheet.columns = Array.from({ length: 14 }, () => ({ width: 11 }));
-      mapSheet.mergeCells("A1:N1"); mapSheet.getCell("A1").value = "候補地点 商圏レポート　1:25,000";
-      mapSheet.getCell("A1").font = { size: 18, bold: true, color: { argb: "FF173E67" } }; mapSheet.getCell("A1").alignment = { horizontal: "center" };
-      mapSheet.mergeCells("A2:G2"); mapSheet.getCell("A2").value = `候補地点：${lat}, ${lng}`;
-      mapSheet.mergeCells("H2:N2"); mapSheet.getCell("H2").value = `出力日時：${new Date().toLocaleString("ja-JP")}`; mapSheet.getCell("H2").alignment = { horizontal: "right" };
       const map = mapRef.current; const mapElement = mapNode.current;
       const originalCenter = map?.getCenter()?.toJSON(); const originalZoom = map?.getZoom();
       const originalWidth = mapElement.style.width; const originalHeight = mapElement.style.height;
@@ -258,30 +252,38 @@ export default function MapDashboard() {
         window.google.maps.event.trigger(map, "resize");
         if (originalCenter && originalZoom != null) { map.setCenter(originalCenter); map.setZoom(originalZoom); }
       }
-      const reportCanvas = document.createElement("canvas"); reportCanvas.width = 1420; reportCanvas.height = 760;
-      const context = reportCanvas.getContext("2d");
-      if (!context) throw new Error("地図画像を作成できませんでした。");
-      context.fillStyle = "#fff"; context.fillRect(0, 0, reportCanvas.width, reportCanvas.height);
-      const cropScale = 1.2; const cropWidth = 1200 / cropScale; const cropHeight = 760 / cropScale;
-      context.drawImage(capturedMap, (1200 - cropWidth) / 2, (760 - cropHeight) / 2, cropWidth, cropHeight, 0, 0, 1200, 760);
-      context.strokeStyle = "#111"; context.lineWidth = 2; context.strokeRect(0, 0, 1419, 759); context.beginPath(); context.moveTo(1200, 0); context.lineTo(1200, 760); context.stroke();
-      const legendX = 1220;
-      context.fillStyle = "#111"; context.font = 'bold 18px "Yu Gothic UI", sans-serif'; context.fillText("凡例", legendX, 475);
-      context.lineWidth = 4; context.beginPath(); context.moveTo(legendX, 515); context.lineTo(legendX + 46, 515); context.stroke();
-      context.font = '15px "Yu Gothic UI", sans-serif'; context.fillText("町丁目境界", legendX + 58, 521);
-      context.font = '12px "Yu Gothic UI", sans-serif'; context.textAlign = "center"; context.fillText("町丁目名", legendX + 25, 556); context.fillText("世帯数", legendX + 25, 572); context.fillText("顧客合計", legendX + 25, 588);
-      context.textAlign = "left"; context.font = '15px "Yu Gothic UI", sans-serif'; context.fillText("町丁目ラベル", legendX + 58, 576);
-      context.fillStyle = "#ffeb00"; context.strokeStyle = "#806f00"; context.lineWidth = 1; context.beginPath(); context.arc(legendX + 25, 622, 9, 0, Math.PI * 2); context.fill(); context.stroke();
-      context.fillStyle = "#111"; context.fillText("競合店舗", legendX + 58, 628);
-      const scaleBarPixels = Math.round(1000 / metersPerPixel * cropScale); const scaleX = legendX; const scaleY = 710;
-      context.font = 'bold 18px Arial, sans-serif'; context.fillText("1:25,000", legendX, 675);
-      context.lineWidth = 3; context.strokeStyle = "#111"; context.beginPath(); context.moveTo(scaleX, scaleY); context.lineTo(scaleX + scaleBarPixels, scaleY); context.moveTo(scaleX, scaleY - 10); context.lineTo(scaleX, scaleY + 10); context.moveTo(scaleX + scaleBarPixels / 2, scaleY - 7); context.lineTo(scaleX + scaleBarPixels / 2, scaleY + 7); context.moveTo(scaleX + scaleBarPixels, scaleY - 10); context.lineTo(scaleX + scaleBarPixels, scaleY + 10); context.stroke();
-      context.font = '12px Arial, sans-serif'; context.fillText("0", scaleX - 3, scaleY + 27); context.textAlign = "center"; context.fillText("0.5", scaleX + scaleBarPixels / 2, scaleY + 27); context.textAlign = "right"; context.fillText("1.0km", scaleX + scaleBarPixels + 3, scaleY + 27);
-      const mapImage = workbook.addImage({ base64: reportCanvas.toDataURL("image/png"), extension: "png" });
-      const mapImageWidth = 1140; const mapImageHeight = Math.round(mapImageWidth * reportCanvas.height / reportCanvas.width);
-      mapSheet.addImage(mapImage, { tl: { col: 0, row: 3 }, ext: { width: mapImageWidth, height: mapImageHeight } });
-      mapSheet.pageSetup.printArea = `A1:N${Math.ceil(mapImageHeight / 20) + 4}`;
-      mapSheet.pageSetup.margins = { left: 0.15, right: 0.15, top: 0.2, bottom: 0.2, header: 0, footer: 0 };
+      [1, 1.2, 1.5, 2].forEach((cropScale) => {
+        const mapSheet = workbook.addWorksheet(`Map_${cropScale.toFixed(1)}`, { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1 } });
+        mapSheet.columns = Array.from({ length: 14 }, () => ({ width: 11 }));
+        mapSheet.mergeCells("A1:N1"); mapSheet.getCell("A1").value = `候補地点 商圏レポート　比較倍率 ${cropScale.toFixed(1)}`;
+        mapSheet.getCell("A1").font = { size: 18, bold: true, color: { argb: "FF173E67" } }; mapSheet.getCell("A1").alignment = { horizontal: "center" };
+        mapSheet.mergeCells("A2:G2"); mapSheet.getCell("A2").value = `候補地点：${lat}, ${lng}`;
+        mapSheet.mergeCells("H2:N2"); mapSheet.getCell("H2").value = `出力日時：${new Date().toLocaleString("ja-JP")}`; mapSheet.getCell("H2").alignment = { horizontal: "right" };
+        const reportCanvas = document.createElement("canvas"); reportCanvas.width = 1420; reportCanvas.height = 760;
+        const context = reportCanvas.getContext("2d");
+        if (!context) throw new Error("地図画像を作成できませんでした。");
+        context.fillStyle = "#fff"; context.fillRect(0, 0, reportCanvas.width, reportCanvas.height);
+        const cropWidth = 1200 / cropScale; const cropHeight = 760 / cropScale;
+        context.drawImage(capturedMap, (1200 - cropWidth) / 2, (760 - cropHeight) / 2, cropWidth, cropHeight, 0, 0, 1200, 760);
+        context.strokeStyle = "#111"; context.lineWidth = 2; context.strokeRect(0, 0, 1419, 759); context.beginPath(); context.moveTo(1200, 0); context.lineTo(1200, 760); context.stroke();
+        const legendX = 1220;
+        context.fillStyle = "#111"; context.font = 'bold 18px "Yu Gothic UI", sans-serif'; context.fillText("凡例", legendX, 475);
+        context.lineWidth = 4; context.beginPath(); context.moveTo(legendX, 515); context.lineTo(legendX + 46, 515); context.stroke();
+        context.font = '15px "Yu Gothic UI", sans-serif'; context.fillText("町丁目境界", legendX + 58, 521);
+        context.font = '12px "Yu Gothic UI", sans-serif'; context.textAlign = "center"; context.fillText("町丁目名", legendX + 25, 556); context.fillText("世帯数", legendX + 25, 572); context.fillText("顧客合計", legendX + 25, 588);
+        context.textAlign = "left"; context.font = '15px "Yu Gothic UI", sans-serif'; context.fillText("町丁目ラベル", legendX + 58, 576);
+        context.fillStyle = "#ffeb00"; context.strokeStyle = "#806f00"; context.lineWidth = 1; context.beginPath(); context.arc(legendX + 25, 622, 9, 0, Math.PI * 2); context.fill(); context.stroke();
+        context.fillStyle = "#111"; context.fillText("競合店舗", legendX + 58, 628);
+        const scaleBarPixels = Math.min(190, Math.round(1000 / metersPerPixel * cropScale)); const scaleX = legendX; const scaleY = 710;
+        context.font = 'bold 18px Arial, sans-serif'; context.fillText(`比較倍率 ${cropScale.toFixed(1)}`, legendX, 675);
+        context.lineWidth = 3; context.strokeStyle = "#111"; context.beginPath(); context.moveTo(scaleX, scaleY); context.lineTo(scaleX + scaleBarPixels, scaleY); context.moveTo(scaleX, scaleY - 10); context.lineTo(scaleX, scaleY + 10); context.moveTo(scaleX + scaleBarPixels / 2, scaleY - 7); context.lineTo(scaleX + scaleBarPixels / 2, scaleY + 7); context.moveTo(scaleX + scaleBarPixels, scaleY - 10); context.lineTo(scaleX + scaleBarPixels, scaleY + 10); context.stroke();
+        context.font = '12px Arial, sans-serif'; context.fillText("0", scaleX - 3, scaleY + 27); context.textAlign = "center"; context.fillText("0.5", scaleX + scaleBarPixels / 2, scaleY + 27); context.textAlign = "right"; context.fillText("1.0km", scaleX + scaleBarPixels + 3, scaleY + 27);
+        const mapImage = workbook.addImage({ base64: reportCanvas.toDataURL("image/png"), extension: "png" });
+        const mapImageWidth = 1140; const mapImageHeight = Math.round(mapImageWidth * reportCanvas.height / reportCanvas.width);
+        mapSheet.addImage(mapImage, { tl: { col: 0, row: 3 }, ext: { width: mapImageWidth, height: mapImageHeight } });
+        mapSheet.pageSetup.printArea = `A1:N${Math.ceil(mapImageHeight / 20) + 4}`;
+        mapSheet.pageSetup.margins = { left: 0.15, right: 0.15, top: 0.2, bottom: 0.2, header: 0, footer: 0 };
+      });
 
       const dataSheet = workbook.addWorksheet("Data", { views: [{ state: "frozen", ySplit: 1, showGridLines: false }] });
       dataSheet.autoFilter = "A1:N1";
