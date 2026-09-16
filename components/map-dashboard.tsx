@@ -28,7 +28,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.11";
+const appVersion = "Ver.1.12";
 const tradeAreaOrder = ["0.5km", "1.0km", "2.0km"] as const;
 
 function loadGoogleMaps(key: string) {
@@ -57,6 +57,26 @@ function centerOf(geometry: Area["geom"]) {
   if (!points.length) return { lat: 35.872, lng: 139.648 };
   const box = points.reduce((v, point) => ({ minLat: Math.min(v.minLat, point[1]), maxLat: Math.max(v.maxLat, point[1]), minLng: Math.min(v.minLng, point[0]), maxLng: Math.max(v.maxLng, point[0]) }), { minLat: 90, maxLat: -90, minLng: 180, maxLng: -180 });
   return { lat: (box.minLat + box.maxLat) / 2, lng: (box.minLng + box.maxLng) / 2 };
+}
+
+// Area-weighted polygon centroid; the existing centerOf is a bounding-box center for labels.
+function areaCentroid(geometry: Area["geom"]): { lat: number; lng: number } {
+  const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.type === "MultiPolygon" ? geometry.coordinates : [];
+  let weightedX = 0, weightedY = 0, weight = 0;
+  for (const polygon of polygons as number[][][][]) for (const [ringIndex, ring] of polygon.entries()) {
+    let twiceArea = 0, x = 0, y = 0;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const [x1, y1] = ring[i], [x2, y2] = ring[i + 1];
+      const cross = x1 * y2 - x2 * y1;
+      twiceArea += cross; x += (x1 + x2) * cross; y += (y1 + y2) * cross;
+    }
+    if (Math.abs(twiceArea) < 1e-12) continue;
+    const signedWeight = (ringIndex === 0 ? 1 : -1) * Math.abs(twiceArea);
+    weightedX += x / (3 * twiceArea) * signedWeight;
+    weightedY += y / (3 * twiceArea) * signedWeight;
+    weight += signedWeight;
+  }
+  return weight > 1e-12 ? { lat: weightedY / weight, lng: weightedX / weight } : centerOf(geometry);
 }
 
 function valueColor(value: number, max: number) {
@@ -95,6 +115,9 @@ export default function MapDashboard() {
   const [candidateLat, setCandidateLat] = useState(String(defaultCandidate.lat));
   const [candidateLng, setCandidateLng] = useState(String(defaultCandidate.lng));
   const [exporting, setExporting] = useState(false);
+  const [huffExporting, setHuffExporting] = useState(false);
+  const [annualFoodSpending, setAnnualFoodSpending] = useState("650000");
+  const [candidateArea, setCandidateArea] = useState("1000");
   const maxValue = useMemo(() => Math.max(1, ...areas.map((a) => Number(a[metric] ?? 0))), [areas, metric]);
   const matchedCount = useMemo(() => areas.filter((a) => a.address).length, [areas]);
 
@@ -219,6 +242,118 @@ export default function MapDashboard() {
     const position = { lat, lng };
     candidateMarkerRef.current.setPosition(position); mapRef.current.panTo(position); mapRef.current.setZoom(15);
     setStatus(`候補地点を ${lat}, ${lng} に設定しました。`);
+  }
+
+  async function exportHuffReport() {
+    const lat = Number(candidateLat), lng = Number(candidateLng);
+    const foodSpending = Number(annualFoodSpending), candidateSqm = Number(candidateArea);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || !(foodSpending > 0) || !(candidateSqm > 0) || !mapNode.current || !mapRef.current) {
+      setStatus("候補地点、候補店の売場面積、食料品消費額を確認してください。"); return;
+    }
+    const origin = { lat, lng };
+    const targetAreas = areas.filter((area) => area.address && distanceKm(origin, areaCentroid(area.geom)) <= 2);
+    const validStores = competitors.filter((store) => Number(store.sales_area_sqm) > 0 && Number.isFinite(Number(store.latitude)) && Number.isFinite(Number(store.longitude)) && distanceKm(origin, { lat: Number(store.latitude), lng: Number(store.longitude) }) <= 5);
+    const excludedStores = competitors.filter((store) => distanceKm(origin, { lat: Number(store.latitude), lng: Number(store.longitude) }) <= 5 && !(Number(store.sales_area_sqm) > 0)).length;
+    if (!targetAreas.length) { setStatus("候補地点の周囲2kmに対象町丁目がありません。"); return; }
+    setHuffExporting(true);
+    try {
+      const sources = [origin, ...validStores.map((store) => ({ lat: Number(store.latitude), lng: Number(store.longitude) }))];
+      const distances: (number | null)[][] = sources.map(() => Array(targetAreas.length).fill(null));
+      for (let si = 0; si < sources.length; si += 10) for (let ti = 0; ti < targetAreas.length; ti += 25) {
+        setStatus(`ハフモデルの道のり距離を取得中（${si + 1}～${Math.min(si + 10, sources.length)}店 / ${sources.length}店）…`);
+        const response = await fetch("/api/valhalla-matrix", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          sources: sources.slice(si, si + 10).map((point) => ({ lat: point.lat, lon: point.lng })),
+          targets: targetAreas.slice(ti, ti + 25).map((area) => { const c = areaCentroid(area.geom); return { lat: c.lat, lon: c.lng }; }),
+        }) });
+        const result = await response.json() as { units?: string; distances?: (number | null)[][]; error?: string };
+        if (!response.ok || result.units !== "kilometers" || !Array.isArray(result.distances)) throw new Error(result.error ?? "Valhallaから距離を取得できませんでした。");
+        for (let row = 0; row < Math.min(10, sources.length - si); row++) for (let col = 0; col < Math.min(25, targetAreas.length - ti); col++) {
+          const value = result.distances[row]?.[col];
+          distances[si + row][ti + col] = typeof value === "number" && Number.isFinite(value) ? value : null;
+        }
+      }
+      const rows = targetAreas.map((area, index) => {
+        const candidateDistance = distances[0][index];
+        if (candidateDistance === null) return { area, distance: null, share: null, households: null, revenue: null };
+        const attractiveness = (candidateSqm / Math.max(candidateDistance, 0.05) ** 2);
+        const total = validStores.reduce((sum, store, storeIndex) => {
+          const distance = distances[storeIndex + 1][index];
+          return sum + (distance === null ? 0 : Number(store.sales_area_sqm) / Math.max(distance, 0.05) ** 2);
+        }, attractiveness);
+        const share = attractiveness / total;
+        const households = Number(area.households_2025 ?? 0) * share;
+        return { area, distance: candidateDistance, share, households, revenue: households * foodSpending };
+      });
+      const missing = rows.filter((row) => row.share === null).length;
+      const missingCompetitorRoutes = distances.slice(1).reduce((count, source) => count + source.filter((distance) => distance === null).length, 0);
+      if (missing || missingCompetitorRoutes) throw new Error(`経路未取得：候補店${missing}件、競合店${missingCompetitorRoutes}件。結果を欠損のまま集計しないため出力を停止しました。`);
+      const [{ Workbook }, { default: html2canvas }] = await Promise.all([import("exceljs"), import("html2canvas")]);
+      const map = mapRef.current, mapElement = mapNode.current!;
+      const originalStyle = map.data.getStyle();
+      const originalCenter = map.getCenter()?.toJSON(), originalZoom = map.getZoom();
+      const width = mapElement.style.width, height = mapElement.style.height;
+      const shareById = new Map(rows.map((row) => [row.area.id, row.share ?? 0]));
+      let captured: HTMLCanvasElement;
+      try {
+        map.data.setStyle((feature: any) => {
+          const share = shareById.get(Number(feature.getId()));
+          return { fillColor: share === undefined ? "#ffffff" : share < 0.2 ? "#fff7bc" : share < 0.4 ? "#fec44f" : share < 0.6 ? "#fe9929" : share < 0.8 ? "#ec7014" : "#cc4c02", fillOpacity: share === undefined ? 0 : 0.72, strokeColor: "#111", strokeWeight: 1.5 };
+        });
+        mapElement.style.width = "1200px"; mapElement.style.height = "760px";
+        mapElement.classList.add("export-capture");
+        window.google.maps.event.trigger(map, "resize");
+        map.setCenter(origin); map.setZoom(14);
+        await new Promise<void>((resolve) => window.google.maps.event.addListenerOnce(map, "idle", () => setTimeout(resolve, 400)));
+        captured = await html2canvas(mapElement, { useCORS: true, allowTaint: false, backgroundColor: "#fff", logging: false, width: 1200, height: 760 });
+      } finally {
+        map.data.setStyle(originalStyle);
+        mapElement.classList.remove("export-capture"); mapElement.style.width = width; mapElement.style.height = height;
+        window.google.maps.event.trigger(map, "resize");
+        if (originalCenter && originalZoom != null) { map.setCenter(originalCenter); map.setZoom(originalZoom); }
+      }
+      const workbook = new Workbook(); workbook.creator = "ArmBox Lab";
+      const sheet = workbook.addWorksheet("吸引率Map", { views: [{ showGridLines: false }], pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1 } });
+      sheet.columns = Array.from({ length: 14 }, () => ({ width: 11 }));
+      sheet.mergeCells("A1:N1"); sheet.getCell("A1").value = "ハフモデル 吸引率マップ"; sheet.getCell("A1").font = { size: 18, bold: true };
+      const canvas = document.createElement("canvas"); canvas.width = 1420; canvas.height = 760;
+      const context = canvas.getContext("2d"); if (!context) throw new Error("地図画像を作成できませんでした。");
+      context.fillStyle = "#fff"; context.fillRect(0, 0, 1420, 760); context.drawImage(captured, 0, 0);
+      context.strokeStyle = "#111"; context.lineWidth = 2; context.strokeRect(0, 0, 1419, 759);
+      context.font = 'bold 19px "Yu Gothic UI", sans-serif'; context.fillStyle = "#111"; context.fillText("吸引率", 1220, 470);
+      ["0～20%", "20～40%", "40～60%", "60～80%", "80～100%"].forEach((label, index) => {
+        context.fillStyle = ["#fff7bc", "#fec44f", "#fe9929", "#ec7014", "#cc4c02"][index]; context.fillRect(1220, 493 + index * 38, 22, 20);
+        context.fillStyle = "#111"; context.font = '15px "Yu Gothic UI", sans-serif'; context.fillText(label, 1255, 510 + index * 38);
+      });
+      const image = workbook.addImage({ base64: canvas.toDataURL("image/png"), extension: "png" });
+      sheet.addImage(image, { tl: { col: 0, row: 2 }, ext: { width: 1140, height: 610 } });
+      sheet.pageSetup.printArea = "A1:N34";
+      const data = workbook.addWorksheet("吸引率Data", { views: [{ state: "frozen", ySplit: 5, showGridLines: false }] });
+      data.mergeCells("A1:H1"); data.getCell("A1").value = "ハフモデル 年間売上予測"; data.getCell("A1").font = { size: 16, bold: true };
+      data.getCell("A2").value = "候補店売場面積(㎡)"; data.getCell("B2").value = candidateSqm;
+      data.getCell("C2").value = "年間食料品消費額(円/世帯)"; data.getCell("D2").value = foodSpending;
+      data.getCell("E2").value = "距離減衰指数"; data.getCell("F2").value = 2;
+      data.getCell("A3").value = "対象競合店数"; data.getCell("B3").value = validStores.length;
+      data.getCell("C3").value = "売場面積未登録の除外店数"; data.getCell("D3").value = excludedStores;
+      data.getCell("A4").value = "対象：候補地点から直線2km以内の町丁目重心。競合店は直線5km以内。道のり距離はValhalla自動車経路。";
+      data.addRow(["町丁目コード", "住所", "町丁目", "道のり距離(km)", "世帯数2025", "吸引率", "吸引世帯数", "年間売上予測(円)"]);
+      rows.forEach((row) => {
+        const line = data.addRow([row.area.code, row.area.address, row.area.town2 ?? row.area.town, row.distance, row.area.households_2025, row.share, row.households, row.revenue]);
+        line.getCell(6).numFmt = "0.0%"; line.getCell(7).numFmt = "#,##0.0"; line.getCell(8).numFmt = "#,##0";
+      });
+      const total = data.addRow(["合計", "", "", "", rows.reduce((sum, row) => sum + Number(row.area.households_2025 ?? 0), 0), "", rows.reduce((sum, row) => sum + Number(row.households ?? 0), 0), rows.reduce((sum, row) => sum + Number(row.revenue ?? 0), 0)]);
+      total.font = { bold: true }; total.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+      total.getCell(7).numFmt = "#,##0.0"; total.getCell(8).numFmt = "#,##0";
+      data.getRow(5).font = { bold: true, color: { argb: "FFFFFFFF" } }; data.getRow(5).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF173E67" } };
+      data.columns.forEach((column, index) => { column.width = [17, 35, 22, 23, 19, 17, 21, 26][index]; });
+      data.autoFilter = "A5:H5";
+      data.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, printArea: `A1:H${data.rowCount}` };
+      const buffer = await workbook.xlsx.writeBuffer();
+      const url = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      const anchor = document.createElement("a"); anchor.href = url; anchor.download = `ArmBox_ハフモデル_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.xlsx`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setStatus(`ハフモデルを出力しました。年間売上予測：${Math.round(rows.reduce((sum, row) => sum + Number(row.revenue ?? 0), 0)).toLocaleString()}円`);
+    } catch (error) { setStatus(`ハフモデル出力エラー：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setHuffExporting(false); }
   }
 
   async function exportExcelReport() {
@@ -359,6 +494,9 @@ export default function MapDashboard() {
         <div className="toggle-row"><span>町丁目ラベル</span><Switch checked={labels} onCheckedChange={setLabels}/></div><div className="divider" />
         <label className="field-label">町丁目検索</label><div className="search-box"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && searchArea()} placeholder="例：桜区西堀"/><button onClick={searchArea} aria-label="検索"><Search size={17}/></button></div>
         <button type="button" className="excel-button" onClick={exportExcelReport} disabled={exporting}><FileSpreadsheet size={17}/>{exporting ? "作成中…" : "Excelレポート出力"}</button>
+        <label className="compact-label">候補店の売場面積（㎡）</label><input className="native-select" type="number" min="1" step="1" value={candidateArea} onChange={(e) => setCandidateArea(e.target.value)}/>
+        <button type="button" className="excel-button" onClick={exportHuffReport} disabled={huffExporting || exporting}><FileSpreadsheet size={17}/>{huffExporting ? "道のり距離を計算中…" : "ハフモデル出力"}</button>
+        <label className="compact-label">年間食料品消費額（円／世帯）</label><input className="native-select" type="number" min="1" step="1000" value={annualFoodSpending} onChange={(e) => setAnnualFoodSpending(e.target.value)}/>
         <div className="legend"><div className="field-label">凡例：{metricLabels[metric]}</div><div className="legend-scale">{palette.map((color) => <i key={color} style={{background: color}} />)}</div><div className="legend-label"><span>少ない</span><span>多い</span></div></div><p className="status">{status}</p><div className="version-info">{appVersion}</div>
       </aside>
       <div className="map-wrap"><div ref={mapNode} className="map"/></div>
