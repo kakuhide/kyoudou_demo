@@ -28,7 +28,7 @@ const metricLabels: Record<Metric, string> = {
 };
 const palette = ["#e8f3ff", "#b9d9ff", "#7bb6f2", "#3d8bd4", "#165b9e"];
 const defaultCandidate = { lat: 35.841573965604184, lng: 139.64476945195932 };
-const appVersion = "Ver.1.12";
+const appVersion = "Ver.1.13";
 const tradeAreaOrder = ["0.5km", "1.0km", "2.0km"] as const;
 
 function loadGoogleMaps(key: string) {
